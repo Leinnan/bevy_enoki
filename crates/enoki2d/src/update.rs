@@ -1,5 +1,5 @@
 use super::{prelude::EmissionShape, Particle2dEffect, ParticleEffectHandle};
-use crate::values::Random;
+use crate::{material::InstanceData, values::Random};
 use bevy::{
     prelude::*,
     render::primitives::Aabb,
@@ -42,26 +42,61 @@ impl Default for ParticleSpawnerState {
 }
 
 /// Component for storing particle data
-#[derive(Component, Default, Clone, Reflect, Deref, DerefMut)]
+#[derive(Component, Default, Reflect, Deref, DerefMut)]
 pub struct ParticleStore {
     #[deref]
-    pub particles: Vec<Particle>,
+    pub particles: Vec<(Particle, InstanceData)>,
 }
 
 #[derive(Clone, Reflect)]
 pub struct Particle {
-    pub(crate) transform: Transform,
+    pub(crate) start_pos: Vec3,
+    pub(crate) direction: Vec2,
+    pub(crate) scale: f32,
+    pub(crate) gravity: Vec3,
     pub(crate) duration: f32,
     pub(crate) duration_fraction: f32,
-    pub(crate) velocity: (Vec3, f32),
+    pub(crate) velocity: Vec4,
     pub(crate) color: LinearRgba,
     pub(crate) frame: u32,
     pub(crate) linear_acceleration: f32,
     pub(crate) linear_damp: f32,
     pub(crate) angular_acceleration: f32,
     pub(crate) angular_damp: f32,
-    pub(crate) gravity_speed: f32,
-    pub(crate) gravity_direction: Vec3,
+}
+
+impl Particle {
+    pub fn get_transform(&self) -> Transform {
+        let mut transform = Transform::from_translation(self.start_pos);
+        transform.scale = Vec3::splat(self.scale);
+
+        let progress = self.duration_fraction;
+
+        // Cache commonly used values
+        let lin_velo = self.velocity.xyz();
+        let angular_vel = self.velocity.w;
+
+        // Apply damping (exponential decay)
+        let lin_damp_factor = (-self.linear_damp * progress * self.duration).exp();
+        let ang_damp_factor = (-self.angular_damp * progress * self.duration).exp();
+
+        // Apply acceleration over time
+        let lin_accel_contribution = self.linear_acceleration * progress * self.duration;
+        let ang_accel_contribution = self.angular_acceleration * progress * self.duration;
+
+        let new_lin_velo =
+            lin_velo * lin_damp_factor + self.direction.extend(0.0) * lin_accel_contribution;
+        let new_angular_vel = angular_vel * ang_damp_factor + ang_accel_contribution;
+
+        // Calculate displacement using physics integration
+        let time_step = progress * self.duration;
+        let displacement = new_lin_velo * time_step + 0.5 * self.gravity * time_step * time_step;
+
+        // Update position with displacement
+        transform.translation += displacement;
+        transform.rotate_local_z(new_angular_vel * time_step);
+        transform
+    }
 }
 
 pub(crate) fn clone_effect(
@@ -95,7 +130,7 @@ pub(crate) fn remove_finished_spawner(
         })
 }
 
-pub(crate) fn update_spawner(
+pub fn update_spawner(
     mut particles: Query<(
         Entity,
         &mut ParticleStore,
@@ -125,7 +160,9 @@ pub(crate) fn update_spawner(
 
             if state.timer.finished() && state.active {
                 for _ in 0..effect.spawn_amount {
-                    store.push(create_particle(effect, &transform))
+                    let particle = create_particle(effect, &transform);
+                    let instance_data: InstanceData = (&particle).into();
+                    store.push((particle, instance_data));
                 }
 
                 if one_shots.get(entity).is_ok() {
@@ -133,15 +170,59 @@ pub(crate) fn update_spawner(
                 }
             }
             let delta = time.delta_secs();
-            store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
-                for particle in particles.iter_mut() {
-                    particle
-                        .duration_fraction
-                        .add_assign(delta / particle.duration);
-                    update_particle(particle, effect, delta);
+            match (effect.scale_curve.as_ref(), effect.color_curve.as_ref()) {
+                (None, None) => {
+                    store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
+                        for (particle, instance_data) in particles.iter_mut() {
+                            particle
+                                .duration_fraction
+                                .add_assign(delta / particle.duration);
+                            instance_data.update_duration_fraction(particle.duration_fraction);
+                            instance_data.update_transform(&particle);
+                        }
+                    });
                 }
-            });
-            store.retain(|particle| particle.duration_fraction < 1.0);
+                (None, Some(color_curve)) => {
+                    store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
+                        for (particle, instance_data) in particles.iter_mut() {
+                            particle
+                                .duration_fraction
+                                .add_assign(delta / particle.duration);
+                            instance_data.update_transform(&particle);
+                            particle.color = color_curve.lerp(particle.duration_fraction);
+                            instance_data.update_duration_fraction(particle.duration_fraction);
+                            instance_data.update_color(&particle.color);
+                        }
+                    });
+                }
+                (Some(scale_curve), None) => {
+                    store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
+                        for (particle, instance_data) in particles.iter_mut() {
+                            particle
+                                .duration_fraction
+                                .add_assign(delta / particle.duration);
+                            particle.scale = scale_curve.lerp(particle.duration_fraction);
+                            instance_data.update_duration_fraction(particle.duration_fraction);
+                            instance_data.update_transform(&particle);
+                        }
+                    });
+                }
+                (Some(scale_curve), Some(color_curve)) => {
+                    store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
+                        for (particle, instance_data) in particles.iter_mut() {
+                            particle
+                                .duration_fraction
+                                .add_assign(delta / particle.duration);
+                            particle.scale = scale_curve.lerp(particle.duration_fraction);
+                            particle.color = color_curve.lerp(particle.duration_fraction);
+                            instance_data.update_duration_fraction(particle.duration_fraction);
+                            instance_data.update_transform(&particle);
+                            instance_data.update_color(&particle.color);
+                        }
+                    });
+                }
+            };
+            store.retain(|(particle, _)| particle.duration_fraction < 1.0);
         },
     );
 }
@@ -152,7 +233,8 @@ fn create_particle(effect: &Particle2dEffect, transform: &Transform) -> Particle
         .direction
         .as_ref()
         .map(|m| m.rand())
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .normalize_or_zero();
 
     // apply local rotation
     let direction = direction.rotate(transform.right().truncate());
@@ -177,6 +259,7 @@ fn create_particle(effect: &Particle2dEffect, transform: &Transform) -> Particle
         .as_ref()
         .map(|g| g.rand())
         .unwrap_or_default()
+        .normalize_or_zero()
         .extend(0.);
 
     let gravity_speed = effect
@@ -209,10 +292,9 @@ fn create_particle(effect: &Particle2dEffect, transform: &Transform) -> Particle
         .map(|a| a.rand())
         .unwrap_or_default();
 
-    let mut transform = *transform;
-    transform.scale = Vec3::splat(scale);
+    let mut transform = transform.translation;
 
-    transform.translation += match effect.emission_shape {
+    transform += match effect.emission_shape {
         EmissionShape::Point => Vec3::ZERO,
         EmissionShape::Circle(radius) => {
             Vec3::new(rand::random::<f32>() - 0.5, rand::random::<f32>() - 0.5, 0.)
@@ -223,8 +305,10 @@ fn create_particle(effect: &Particle2dEffect, transform: &Transform) -> Particle
     };
 
     Particle {
-        transform,
-        velocity: ((direction * speed).extend(0.), angular),
+        start_pos: transform,
+        scale,
+        direction,
+        velocity: (direction * speed).extend(0.).extend(angular),
         duration_fraction: 0.0,
         duration: effect.lifetime.rand(),
         color: effect.color.unwrap_or(LinearRgba::WHITE),
@@ -232,34 +316,9 @@ fn create_particle(effect: &Particle2dEffect, transform: &Transform) -> Particle
         linear_damp,
         angular_acceleration,
         linear_acceleration,
-        gravity_direction,
-        gravity_speed,
+        gravity: gravity_direction * gravity_speed,
         frame: 0,
     }
-}
-
-fn update_particle(particle: &mut Particle, effect: &Particle2dEffect, delta: f32) {
-    let (lin_velo, rot_velo) = &mut particle.velocity;
-    let progress = particle.duration_fraction;
-
-    *lin_velo = *lin_velo - progress * particle.linear_damp * *lin_velo * delta
-        + progress * particle.linear_acceleration * *lin_velo * delta;
-
-    *rot_velo = *rot_velo - progress * particle.angular_damp * *rot_velo * delta
-        + progress * particle.angular_acceleration * *rot_velo * delta;
-
-    if let Some(scale_curve) = effect.scale_curve.as_ref() {
-        particle.transform.scale = Vec3::splat(scale_curve.lerp(progress));
-    }
-
-    if let Some(color_curve) = effect.color_curve.as_ref() {
-        particle.color = color_curve.lerp(progress);
-    }
-
-    let gravity = particle.gravity_direction * particle.gravity_speed * delta;
-
-    particle.transform.translation += *lin_velo * delta + gravity;
-    particle.transform.rotate_local_z(*rot_velo * delta);
 }
 
 pub(crate) fn calculcate_particle_bounds(
@@ -276,11 +335,11 @@ pub(crate) fn calculcate_particle_bounds(
             .iter()
             .enumerate()
             .filter(|(i, _)| i % accuracy == 0)
-            .fold((Vec2::ZERO, Vec2::ZERO), |mut acc, (_, particle)| {
-                acc.0.x = acc.0.x.min(particle.transform.translation.x);
-                acc.0.y = acc.0.y.min(particle.transform.translation.y);
-                acc.1.x = acc.1.x.max(particle.transform.translation.x);
-                acc.1.y = acc.1.y.max(particle.transform.translation.y);
+            .fold((Vec2::ZERO, Vec2::ZERO), |mut acc, (_, (particle, _))| {
+                acc.0.x = acc.0.x.min(particle.start_pos.x);
+                acc.0.y = acc.0.y.min(particle.start_pos.y);
+                acc.1.x = acc.1.x.max(particle.start_pos.x);
+                acc.1.y = acc.1.y.max(particle.start_pos.y);
                 acc
             });
         cmd.entity(entity)

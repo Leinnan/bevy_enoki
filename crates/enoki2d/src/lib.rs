@@ -24,7 +24,7 @@ mod curve;
 mod loader;
 mod material;
 mod sprite;
-mod update;
+pub mod update;
 mod values;
 
 #[allow(unused)]
@@ -145,7 +145,7 @@ pub struct RenderParticleTag;
 
 /// The main particle spawner components
 /// has required components
-#[derive(Component, DerefMut, Deref, Clone)]
+#[derive(Component, DerefMut, Deref, Clone, Reflect)]
 #[require(
     ParticleSpawnerState,
     ParticleEffectInstance,

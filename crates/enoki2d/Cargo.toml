@@ -28,6 +28,7 @@ bevy = { version = "0.16", default-features = false, features = [
 serde = { version = "1.0.197", features = ["derive"] }
 ron = "0.10"
 rand = { version = "0.8.5" }
+smallvec = { version = "1", default-features = false }
 
 [target.wasm32-unknown-unknown.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }

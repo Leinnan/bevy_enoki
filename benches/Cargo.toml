@@ -1,0 +1,20 @@
+[package]
+name = "benches"
+edition = "2024"
+description = "Benchmarks that test Bevy's performance"
+publish = false
+license = "MIT OR Apache-2.0"
+# Do not automatically discover benchmarks, we specify them manually instead.
+# autobenches = false
+
+[dependencies]
+# The primary crate that runs and analyzes our benchmarks. This is a regular dependency because the
+# `bench!` macro refers to it in its documentation.
+criterion = { version = "0.6.0", features = ["html_reports"] }
+bevy = "0.16"
+bevy_enoki = { path = "../crates/enoki2d" }
+
+[[bench]]
+name = "first"
+path = "benches/first_test.rs"
+harness = false

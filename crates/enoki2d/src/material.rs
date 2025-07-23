@@ -188,7 +188,10 @@ fn extract_particles<M: Particle2dMaterial>(
             .insert((ZOrder(FloatOrd(global.translation().z)), ParticleTag));
         let particles = particle_store
             .par_splat_map(ComputeTaskPool::get(), None, |_, particles| {
-                particles.iter().map(InstanceData::from).collect::<Vec<_>>()
+                particles
+                    .iter()
+                    .map(|(_, data)| data.clone())
+                    .collect::<Vec<_>>()
             })
             .into_iter()
             .flatten()
@@ -267,30 +270,48 @@ pub struct InstanceData {
     custom: Vec4,
 }
 
+impl InstanceData {
+    #[inline(always)]
+    pub fn update_transform(&mut self, particle: &Particle) {
+        let transform = particle.get_transform();
+        let transpose_model_3x3 = transform.compute_affine().matrix3.transpose();
+        self.transform = [
+            transpose_model_3x3.x_axis.extend(transform.translation.x),
+            transpose_model_3x3.y_axis.extend(transform.translation.y),
+            transpose_model_3x3.z_axis.extend(transform.translation.z),
+        ];
+    }
+
+    #[inline(always)]
+    pub fn update_color(&mut self, color: &LinearRgba) {
+        self.color = color.to_f32_array();
+    }
+
+    #[inline(always)]
+    pub fn update_duration_fraction(&mut self, duration_fraction: f32) {
+        self.custom.x = duration_fraction;
+    }
+}
+
 impl From<&Particle> for InstanceData {
     #[inline(always)]
     fn from(value: &Particle) -> Self {
-        let transpose_model_3x3 = value.transform.compute_affine().matrix3.transpose();
+        let transpose_model_3x3 = Transform::from_translation(value.start_pos)
+            .with_scale(Vec3::splat(value.scale))
+            .compute_affine()
+            .matrix3
+            .transpose();
         Self {
             transform: [
-                transpose_model_3x3
-                    .x_axis
-                    .extend(value.transform.translation.x),
-                transpose_model_3x3
-                    .y_axis
-                    .extend(value.transform.translation.y),
-                transpose_model_3x3
-                    .z_axis
-                    .extend(value.transform.translation.z),
+                transpose_model_3x3.x_axis.extend(value.start_pos.x),
+                transpose_model_3x3.y_axis.extend(value.start_pos.y),
+                transpose_model_3x3.z_axis.extend(0.0),
             ],
             color: value.color.to_f32_array(),
             custom: Vec4::new(value.duration_fraction, value.duration, 0., 0.),
         }
     }
 }
-
-#[derive(Component, Deref)]
-pub struct InstanceMaterialData(Vec<InstanceData>);
 
 #[derive(Resource)]
 pub struct PreparedParticleMaterial<M: Particle2dMaterial> {
