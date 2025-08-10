@@ -5,7 +5,7 @@
 use self::prelude::{
     Particle2dMaterial, ParticleEffectInstance, ParticleSpawnerState, ParticleStore,
 };
-use crate::sprite::SpriteParticle2dMaterial;
+use crate::sprite::{AtlasParticle2dMaterial, SpriteParticle2dMaterial};
 use bevy::{
     asset::{load_internal_asset, weak_handle},
     prelude::*,
@@ -33,7 +33,7 @@ pub mod prelude {
     pub use super::curve::{LerpThat, MultiCurve /* , ParticleEaseFunction */};
     pub use super::loader::ParticleEffectLoader;
     pub use super::material::{Particle2dMaterial, Particle2dMaterialPlugin};
-    pub use super::sprite::SpriteParticle2dMaterial;
+    pub use super::sprite::{AtlasParticle2dMaterial, SpriteParticle2dMaterial};
     pub use super::update::{OneShot, ParticleEffectInstance, ParticleSpawnerState, ParticleStore};
     pub use super::values::{Random, Rval};
     pub use super::{
@@ -50,6 +50,8 @@ pub(crate) const PARTICLE_COLOR_FRAG: Handle<Shader> =
     weak_handle!("f60a0cf3-19d3-4425-b6f8-b06bf7ba2f34");
 pub(crate) const PARTICLE_SPRITE_FRAG: Handle<Shader> =
     weak_handle!("9b13ccf9-eea1-4515-bdd1-1b4131368f71");
+pub(crate) const PARTICLE_ATLAS_SPRITE_FRAG: Handle<Shader> =
+    weak_handle!("9b13ccf9-eea1-4511-bdd1-1b4131368f71");
 
 pub struct EnokiPlugin;
 impl Plugin for EnokiPlugin {
@@ -81,12 +83,18 @@ impl Plugin for EnokiPlugin {
             "shaders/particle_sprite_frag.wgsl",
             Shader::from_wgsl
         );
+        load_internal_asset!(
+            app,
+            PARTICLE_ATLAS_SPRITE_FRAG,
+            "shaders/particle_atlas_sprite_frag.wgsl",
+            Shader::from_wgsl
+        );
 
         app.add_plugins(material::Particle2dMaterialPlugin::<SpriteParticle2dMaterial>::default());
+        app.add_plugins(material::Particle2dMaterialPlugin::<AtlasParticle2dMaterial>::default());
         app.add_plugins(material::Particle2dMaterialPlugin::<ColorParticle2dMaterial>::default());
 
         app.register_type::<update::ParticleStore>();
-        app.register_type::<update::ParticleSpawnerState>();
         app.register_type::<update::ParticleSpawnerState>();
         app.register_type::<update::Particle>();
         app.register_type::<ParticleEffectHandle>();
@@ -111,15 +119,18 @@ impl Plugin for EnokiPlugin {
             First,
             loader::on_asset_loaded.run_if(on_event::<AssetEvent<Particle2dEffect>>),
         );
-
+        app.add_systems(
+            Update,
+            (update::particles_spawn, update::update_spawner).chain(),
+        );
         app.add_systems(
             Update,
             (
                 loader::reload_effect,
                 update::clone_effect,
                 update::remove_finished_spawner,
-                update::update_spawner,
-            ),
+                // update::update_spawner,
+            ), // .before(update::update_spawner_particles),
         );
 
         app.add_systems(
@@ -140,7 +151,6 @@ pub struct NoAutoAabb;
 /// tag component for visibilty check
 #[derive(Clone, Component, Default)]
 #[require(VisibilityClass)]
-#[component(on_add = view::add_visibility_class::<RenderParticleTag>)]
 pub struct RenderParticleTag;
 
 /// The main particle spawner components
@@ -157,6 +167,7 @@ pub struct RenderParticleTag;
     SyncToRenderWorld,
     RenderParticleTag
 )]
+#[component(on_add = view::add_visibility_class::<RenderParticleTag>)]
 pub struct ParticleSpawner<T: Particle2dMaterial>(pub Handle<T>);
 
 impl<T: Particle2dMaterial> From<Handle<T>> for ParticleSpawner<T> {

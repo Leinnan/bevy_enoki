@@ -117,9 +117,7 @@ fn show_fps(
         return;
     };
 
-    text.0 = format!(
-        "O:ZoomOut I:ZoomIn Arrow:Move\nFPS: {fps:.1}\nParticles: {particle_count}"
-    );
+    text.0 = format!("O:ZoomOut I:ZoomIn Arrow:Move\nFPS: {fps:.1}\nParticles: {particle_count}");
 }
 
 fn move_camera(

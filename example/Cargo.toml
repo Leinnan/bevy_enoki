@@ -5,14 +5,19 @@ edition = "2021"
 
 [dependencies]
 bevy = {version = "0.16.0", features = [
-	"file_watcher",
+	"file_watcher", "trace_tracy", "trace_tracy_memory"
 ]}
-bevy_enoki = { path = "../crates/enoki2d" }
+tracy-client-sys = {version = "0.24.3"}
+bevy_enoki = { path = "../crates/enoki2d", features = ["trace"] }
 rand = "0.8.5"
 
 [[bin]]
 name = "sprites"
 path = "src/sprites.rs"
+
+[[bin]]
+name = "atlas"
+path = "src/atlas.rs"
 
 [[bin]]
 name = "dynamic"

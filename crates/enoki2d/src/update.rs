@@ -1,10 +1,11 @@
 use super::{prelude::EmissionShape, Particle2dEffect, ParticleEffectHandle};
-use crate::values::Random;
+use crate::{material::InstanceData, values::Random};
 use bevy::{
     prelude::*,
     render::primitives::Aabb,
     tasks::{ComputeTaskPool, ParallelSliceMut},
 };
+use bytemuck::{NoUninit, Zeroable};
 use std::{ops::AddAssign, time::Duration};
 
 /// Tag Component, deactivates spawner after the first
@@ -46,9 +47,44 @@ impl Default for ParticleSpawnerState {
 pub struct ParticleStore {
     #[deref]
     pub particles: Vec<Particle>,
+    pub particles_data: Vec<InstanceData>,
 }
 
-#[derive(Clone, Reflect)]
+impl ParticleStore {
+    pub fn update_data(&mut self) {
+        self.particles_data
+            .resize(self.particles.len(), InstanceData::default());
+        for (i, data) in self.particles_data.iter_mut().enumerate() {
+            let particle = &self.particles[i];
+            data.color[0] = particle.color.red;
+            data.color[1] = particle.color.green;
+            data.color[2] = particle.color.blue;
+            data.color[3] = particle.color.alpha;
+            data.custom.x = particle.duration_fraction;
+            data.custom.y = particle.duration;
+            let matrix = particle.transform.compute_affine().matrix3.transpose();
+            data.transform[0] = matrix.x_axis.extend(particle.transform.translation.x);
+            data.transform[1] = matrix.y_axis.extend(particle.transform.translation.y);
+            data.transform[2] = matrix.z_axis.extend(particle.transform.translation.z);
+        }
+    }
+}
+
+#[derive(NoUninit, Clone, Copy, Default, Zeroable)]
+#[repr(C)]
+pub struct ParticleSettings {
+    pub(crate) gravity_direction: Vec3,
+    pub(crate) velocity: Vec3,
+    pub(crate) angular_velocity: f32,
+    pub(crate) duration: f32,
+    pub(crate) linear_acceleration: f32,
+    pub(crate) linear_damp: f32,
+    pub(crate) angular_acceleration: f32,
+    pub(crate) angular_damp: f32,
+    pub(crate) gravity_speed: f32,
+}
+
+#[derive(Clone, Reflect, Default)]
 pub struct Particle {
     pub(crate) transform: Transform,
     pub(crate) duration: f32,
@@ -95,56 +131,163 @@ pub(crate) fn remove_finished_spawner(
         })
 }
 
-pub(crate) fn update_spawner(
+pub(crate) fn particles_spawn(
     mut particles: Query<(
-        Entity,
         &mut ParticleStore,
         &mut ParticleSpawnerState,
         &ParticleEffectInstance,
         &GlobalTransform,
+        Option<&OneShot>,
     )>,
-    one_shots: Query<&OneShot>,
     time: Res<Time<Virtual>>,
 ) {
     particles.par_iter_mut().for_each(
-        |(entity, mut store, mut state, effect_instance, transform)| {
-            if state.max_particles <= store.particles.len() as u32 {
-                return;
-            }
-
+        |(mut store, mut state, effect_instance, transform, one_shot)| {
             let Some(effect) = &effect_instance.0 else {
                 return;
             };
-
-            let transform = transform.compute_transform();
 
             state
                 .timer
                 .set_duration(Duration::from_secs_f32(effect.spawn_rate));
             state.timer.tick(time.delta());
 
-            if state.timer.finished() && state.active {
+            if state.timer.finished()
+                && state.active
+                && state.max_particles > store.particles.len() as u32
+            {
+                #[cfg(feature = "trace")]
+                let _span = bevy::log::info_span!("spawn_particles").entered();
+
+                let transform = transform.compute_transform();
                 for _ in 0..effect.spawn_amount {
                     store.push(create_particle(effect, &transform))
                 }
 
-                if one_shots.get(entity).is_ok() {
+                if one_shot.is_some() {
                     state.active = false;
                 }
             }
-            let delta = time.delta_secs();
-            store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
-                for particle in particles.iter_mut() {
-                    particle
-                        .duration_fraction
-                        .add_assign(delta / particle.duration);
-                    update_particle(particle, effect, delta);
-                }
-            });
-            store.retain(|particle| particle.duration_fraction < 1.0);
         },
     );
 }
+
+pub(crate) fn update_spawner(
+    mut particles: Query<(
+        // Entity,
+        &mut ParticleStore,
+        // &mut ParticleSpawnerState,
+        &ParticleEffectInstance,
+        // &GlobalTransform,
+    )>,
+    // one_shots: Query<&OneShot>,
+    time: Res<Time<Virtual>>,
+) {
+    particles
+        .par_iter_mut()
+        .for_each(|(mut store, effect_instance)| {
+            let Some(effect) = &effect_instance.0 else {
+                return;
+            };
+            let delta = time.delta_secs();
+            {
+                #[cfg(feature = "trace")]
+                let _span = bevy::log::info_span!("update_particles").entered();
+                match (&effect.color_curve, &effect.scale_curve) {
+                    (None, None) => {
+                        store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
+                            for particle in particles.iter_mut() {
+                                particle
+                                    .duration_fraction
+                                    .add_assign(delta / particle.duration);
+                                update_particle(particle, delta);
+                            }
+                        });
+                    }
+                    (None, Some(scale_curve)) => {
+                        store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
+                            for particle in particles.iter_mut() {
+                                particle
+                                    .duration_fraction
+                                    .add_assign(delta / particle.duration);
+                                update_particle(particle, delta);
+                                let scale = scale_curve.lerp(particle.duration_fraction);
+                                particle.transform.scale.x = scale;
+                                particle.transform.scale.y = scale;
+                                particle.transform.scale.z = scale;
+                            }
+                        });
+                    }
+                    (Some(color_curve), None) => {
+                        store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
+                            for particle in particles.iter_mut() {
+                                particle
+                                    .duration_fraction
+                                    .add_assign(delta / particle.duration);
+                                update_particle(particle, delta);
+                                particle.color = color_curve.lerp(particle.duration_fraction);
+                            }
+                        });
+                    }
+                    (Some(color_curve), Some(scale_curve)) => {
+                        store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
+                            for particle in particles.iter_mut() {
+                                particle
+                                    .duration_fraction
+                                    .add_assign(delta / particle.duration);
+                                update_particle(particle, delta);
+                                let scale = scale_curve.lerp(particle.duration_fraction);
+                                particle.transform.scale.x = scale;
+                                particle.transform.scale.y = scale;
+                                particle.transform.scale.z = scale;
+                                particle.color = color_curve.lerp(particle.duration_fraction);
+                            }
+                        });
+                    }
+                }
+                store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
+                    for particle in particles.iter_mut() {
+                        particle
+                            .duration_fraction
+                            .add_assign(delta / particle.duration);
+                        update_particle(particle, delta);
+                    }
+                });
+            }
+            {
+                #[cfg(feature = "trace")]
+                let _span = bevy::log::info_span!("remove_old_particles").entered();
+                store.retain(|particle| particle.duration_fraction < 1.0);
+            }
+            {
+                #[cfg(feature = "trace")]
+                let _span = bevy::log::info_span!("build_instances_data").entered();
+                store.update_data();
+            }
+        });
+}
+// pub(crate) fn update_spawner_particles(
+//     mut particles: Query<(&mut ParticleStore, &ParticleEffectInstance)>,
+//     time: Res<Time<Virtual>>,
+// ) {
+//     particles
+//         .par_iter_mut()
+//         .for_each(|(mut store, effect_instance)| {
+//             let Some(effect) = &effect_instance.0 else {
+//                 return;
+//             };
+//             let delta = time.delta_secs();
+//             store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
+//                 for particle in particles.iter_mut() {
+//                     particle
+//                         .duration_fraction
+//                         .add_assign(delta / particle.duration);
+//                     update_particle(particle, effect, delta);
+//                 }
+//             });
+//             store.retain(|particle| particle.duration_fraction < 1.0);
+//         });
+// }
 
 fn create_particle(effect: &Particle2dEffect, transform: &Transform) -> Particle {
     // direction
@@ -238,7 +381,8 @@ fn create_particle(effect: &Particle2dEffect, transform: &Transform) -> Particle
     }
 }
 
-fn update_particle(particle: &mut Particle, effect: &Particle2dEffect, delta: f32) {
+#[inline]
+fn update_particle(particle: &mut Particle, delta: f32) {
     let (lin_velo, rot_velo) = &mut particle.velocity;
     let progress = particle.duration_fraction;
 
@@ -247,14 +391,6 @@ fn update_particle(particle: &mut Particle, effect: &Particle2dEffect, delta: f3
 
     *rot_velo = *rot_velo - progress * particle.angular_damp * *rot_velo * delta
         + progress * particle.angular_acceleration * *rot_velo * delta;
-
-    if let Some(scale_curve) = effect.scale_curve.as_ref() {
-        particle.transform.scale = Vec3::splat(scale_curve.lerp(progress));
-    }
-
-    if let Some(color_curve) = effect.color_curve.as_ref() {
-        particle.color = color_curve.lerp(progress);
-    }
 
     let gravity = particle.gravity_direction * particle.gravity_speed * delta;
 

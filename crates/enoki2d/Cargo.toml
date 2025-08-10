@@ -16,8 +16,13 @@ dev = [
   "bevy/multi_threaded",
   "bevy/embedded_watcher",
 ]
+trace = [
+  "bevy/trace_tracy",
+  "bevy/trace_tracy_memory",
+]
 
 [dependencies]
+bytemuck = { version = "1.5", features = ["derive", "must_cast"] }
 bevy = { version = "0.16", default-features = false, features = [
   "bevy_core_pipeline",
   "bevy_asset",

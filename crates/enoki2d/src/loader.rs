@@ -1,5 +1,5 @@
 use super::ParticleEffectInstance;
-use crate::{ParticleEffectHandle, Particle2dEffect};
+use crate::{Particle2dEffect, ParticleEffectHandle};
 use bevy::{
     asset::{io::Reader, AssetLoadError, AssetLoader, LoadContext},
     prelude::*,
@@ -20,8 +20,10 @@ impl AssetLoader for ParticleEffectLoader {
     ) -> Result<Self::Asset, Self::Error> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await.unwrap();
-        let mut asset = ron::de::from_bytes::<Self::Asset>(bytes.as_slice())
-            .map_err(|_| AssetLoadError::AssetMetaReadError)?;
+        let mut asset = ron::de::from_bytes::<Self::Asset>(bytes.as_slice()).map_err(|e| {
+            error!("Failed to load particle effect asset: {}", e);
+            AssetLoadError::AssetMetaReadError
+        })?;
 
         if let Some(curve) = asset.scale_curve.as_mut() {
             curve.sort();

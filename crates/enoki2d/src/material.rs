@@ -1,6 +1,6 @@
 use crate::RenderParticleTag;
 
-use super::{update::Particle, ParticleSpawner, ParticleStore};
+use super::{ParticleSpawner, ParticleStore};
 use bevy::{
     core_pipeline::core_2d::{Transparent2d, CORE_2D_DEPTH_FORMAT},
     ecs::{
@@ -38,8 +38,8 @@ use bevy::{
         Extract, Render, RenderApp, RenderSet,
     },
     sprite::Mesh2dPipelineKey,
-    tasks::{ComputeTaskPool, ParallelSlice},
 };
+use bytemuck::{Pod, Zeroable};
 use std::{hash::Hash, ops::Range};
 
 /// Particle Material Trait
@@ -75,7 +75,12 @@ impl<M: Particle2dMaterial> Plugin for Particle2dMaterialPlugin<M> {
             .init_resource::<RenderParticleMaterials<M>>()
             .add_systems(
                 ExtractSchedule,
-                (extract_particles::<M>, extract_materials::<M>),
+                (
+                    remove_z_order,
+                    extract_particles::<M>,
+                    extract_materials::<M>,
+                )
+                    .chain(),
             )
             .add_systems(
                 Render,
@@ -162,6 +167,13 @@ fn extract_materials<M: Particle2dMaterial>(
         }
     }
 }
+
+fn remove_z_order(mut commands: Commands, query: Query<Entity, With<ZOrder>>) {
+    for entity in query.iter() {
+        commands.entity(entity).remove::<ZOrder>();
+    }
+}
+
 #[allow(clippy::type_complexity)]
 fn extract_particles<M: Particle2dMaterial>(
     mut cmd: Commands,
@@ -177,31 +189,42 @@ fn extract_particles<M: Particle2dMaterial>(
         )>,
     >,
 ) {
-    extraced_batches.particles.clear();
-    query.iter().for_each(|emitter| {
+    extraced_batches.particles.iter_mut().for_each(|(e, data)| {
+        let Some(emitter) = query.iter().find(|it| e.eq(&**it.4)) else {
+            data.clear();
+            return;
+        };
         let (particle_store, global, material_handle, visbility, render_entity) = emitter;
         if !visbility.get() || particle_store.is_empty() {
+            data.clear();
+            return;
+        }
+        cmd.entity(**render_entity)
+            .insert(ZOrder(FloatOrd(global.translation().z)));
+        render_material_instances.insert(**render_entity, material_handle.id());
+        if data.len() != particle_store.particles_data.len() {
+            data.resize(particle_store.particles_data.len(), Default::default());
+        }
+        data.clone_from_slice(&particle_store.particles_data);
+    });
+    query.iter().for_each(|emitter| {
+        let (particle_store, global, material_handle, visbility, render_entity) = emitter;
+        if extraced_batches.particles.contains_key(&**render_entity)
+            || !visbility.get()
+            || particle_store.is_empty()
+        {
             return;
         }
 
         cmd.entity(**render_entity)
-            .insert((ZOrder(FloatOrd(global.translation().z)), ParticleTag));
-        let particles = particle_store
-            .par_splat_map(ComputeTaskPool::get(), None, |_, particles| {
-                particles.iter().map(InstanceData::from).collect::<Vec<_>>()
-            })
-            .into_iter()
-            .flatten()
-            .collect();
+            .insert(ZOrder(FloatOrd(global.translation().z)));
         render_material_instances.insert(**render_entity, material_handle.id());
         extraced_batches
             .particles
-            .insert(**render_entity, particles);
+            .insert(**render_entity, particle_store.particles_data.clone());
     });
+    extraced_batches.particles.retain(|_, d| !d.is_empty());
 }
-
-#[derive(Component, Default)]
-pub struct ParticleTag;
 
 #[derive(Component, Deref)]
 pub struct ZOrder(FloatOrd);
@@ -240,7 +263,7 @@ fn queue_particles<M: Particle2dMaterial>(
             }
 
             let Ok(order) = z_orders.get(*entity) else {
-                return;
+                continue;
             };
 
             transparent_phase.add(Transparent2d {
@@ -260,37 +283,25 @@ fn queue_particles<M: Particle2dMaterial>(
 // ----------------------------------------------
 //
 
-#[derive(Clone, Debug, Copy, ShaderType, Reflect)]
+// #[derive(Clone, Debug, Copy, ShaderType, Reflect)]
+#[derive(Clone, Debug, Copy, ShaderType, Reflect, Pod, Zeroable, Default)]
+#[repr(C)]
 pub struct InstanceData {
-    transform: [Vec4; 3],
-    color: [f32; 4],
-    custom: Vec4,
+    pub transform: [Vec4; 3],
+    pub color: [f32; 4],
+    pub custom: Vec4,
 }
 
-impl From<&Particle> for InstanceData {
-    #[inline(always)]
-    fn from(value: &Particle) -> Self {
-        let transpose_model_3x3 = value.transform.compute_affine().matrix3.transpose();
-        Self {
-            transform: [
-                transpose_model_3x3
-                    .x_axis
-                    .extend(value.transform.translation.x),
-                transpose_model_3x3
-                    .y_axis
-                    .extend(value.transform.translation.y),
-                transpose_model_3x3
-                    .z_axis
-                    .extend(value.transform.translation.z),
-            ],
-            color: value.color.to_f32_array(),
-            custom: Vec4::new(value.duration_fraction, value.duration, 0., 0.),
-        }
-    }
-}
-
-#[derive(Component, Deref)]
-pub struct InstanceMaterialData(Vec<InstanceData>);
+// impl From<&Particle> for InstanceData {
+//     #[inline(always)]
+//     fn from(value: &Particle) -> Self {
+//         Self {
+//             transform: value.cache_matrix,
+//             color: value.color.to_f32_array(),
+//             custom: Vec4::new(value.duration_fraction, value.duration, 0., 0.),
+//         }
+//     }
+// }
 
 #[derive(Resource)]
 pub struct PreparedParticleMaterial<M: Particle2dMaterial> {

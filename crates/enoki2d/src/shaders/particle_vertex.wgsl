@@ -21,12 +21,15 @@ fn vertex(in: VertexIn) -> VertexOutput {
         f32((in.index & 0x2u) >> 1u),
         0.0
     );
-
-    out.clip_position = view.clip_from_world * affine3_to_square(mat3x4<f32>(
+    // Use precomputed transformation matrix (much faster)
+    let model_matrix = transpose(mat4x4<f32>(
         in.i_translation,
         in.i_rotation,
         in.i_scale,
-    )) * vec4<f32>(vertex_position - vec3(0.5,0.5,0.), 1.0);
+        vec4<f32>(0.0, 0.0, 0.0, 1.0)
+    ));
+
+    out.clip_position = view.clip_from_world * model_matrix * vec4<f32>(vertex_position - vec3(0.5,0.5,0.), 1.0);
 
     out.color = in.i_color;
 	out.uv = vec2(vertex_position.x, 1.-vertex_position.y);

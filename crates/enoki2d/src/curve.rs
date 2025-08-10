@@ -7,8 +7,14 @@ where
     T: LerpThat<T> + Clone + Copy + std::fmt::Debug + Default,
 {
     pub points: Vec<(T, f32, Option<EaseFunction>)>,
+    #[serde(skip, default)]
     start_value: T,
+    #[serde(skip, default)]
     end_value: T,
+    #[serde(skip, default)]
+    start_pos: f32,
+    #[serde(skip, default)]
+    end_pos: f32,
 }
 
 impl<T> MultiCurve<T>
@@ -20,6 +26,8 @@ where
             points: vec![],
             start_value: T::default(),
             end_value: T::default(),
+            start_pos: 0.0,
+            end_pos: 1.0,
         }
     }
 
@@ -30,10 +38,12 @@ where
             .points
             .first()
             .map_or(T::default(), |(value, _, _)| *value);
+        self.start_pos = self.points.first().map_or(0.0, |(_, pos, _)| *pos);
         self.end_value = self
             .points
             .last()
             .map_or(T::default(), |(value, _, _)| *value);
+        self.end_pos = self.points.last().map_or(0.0, |(_, pos, _)| *pos);
     }
 
     /// adds a point
@@ -44,36 +54,59 @@ where
     }
 
     /// reads the value from a given position (0 - 1.)
+    #[inline]
     pub fn lerp(&self, position: f32) -> T {
-        let position = position.max(0.);
-
-        let right_index = self.points.iter().position(|(_, pos, _)| *pos > position);
-        let Some(right_index) = right_index else {
+        if position >= self.end_pos {
             return self.end_value;
-        };
-
-        let left_index = right_index.saturating_sub(1);
-
-        if right_index == left_index {
+        } else if position <= self.start_pos {
             return self.start_value;
         }
+        for i in 0..(self.points.len() - 1) {
+            let (left_value, left_pos, _) = &self.points[i];
+            let (right_value, right_pos, easing) = &self.points[i + 1];
 
-        let left_pos = self.points[left_index].1;
-        let right_pos = self.points[right_index].1;
+            if position >= *left_pos && position <= *right_pos {
+                let progress = (position - *left_pos) / (*right_pos - *left_pos);
 
-        let left_value = self.points[left_index].0;
-        let right_value = self.points[right_index].0;
+                let eased_progress = match easing {
+                    Some(easing) => EasingCurve::new(0., 1., *easing)
+                        .sample(progress)
+                        .unwrap_or_default(),
+                    None => progress,
+                };
 
-        let progress = (position - left_pos) / (right_pos - left_pos);
+                return (*left_value).lerp_that(*right_value, eased_progress);
+            }
+        }
+        return self.start_value;
 
-        let eased_progress = match &self.points[right_index].2 {
-            Some(easing) => EasingCurve::new(0., 1., *easing)
-                .sample(progress)
-                .unwrap_or_default(),
-            None => progress,
-        };
+        // let right_index = self.points.iter().position(|(_, pos, _)| *pos > position);
+        // let Some(right_index) = right_index else {
+        //     return self.end_value;
+        // };
 
-        left_value.lerp_that(right_value, eased_progress)
+        // let left_index = right_index.saturating_sub(1);
+
+        // if right_index == left_index {
+        //     return self.start_value;
+        // }
+
+        // let left_pos = self.points[left_index].1;
+        // let right_pos = self.points[right_index].1;
+
+        // let left_value = self.points[left_index].0;
+        // let right_value = self.points[right_index].0;
+
+        // let progress = (position - left_pos) / (right_pos - left_pos);
+
+        // let eased_progress = match &self.points[right_index].2 {
+        //     Some(easing) => EasingCurve::new(0., 1., *easing)
+        //         .sample(progress)
+        //         .unwrap_or_default(),
+        //     None => progress,
+        // };
+
+        // left_value.lerp_that(right_value, eased_progress)
     }
 }
 

@@ -1,12 +1,13 @@
 /// ----------------------------------------------
-/// material example
-/// how to add a custom material
+/// Atlas example
+/// how to display a atlas
 /// ----------------------------------------------
 use bevy::{
     core_pipeline::bloom::Bloom, diagnostic::DiagnosticsStore, image::ImageSamplerDescriptor,
-    prelude::*, render::render_resource::AsBindGroup,
+    prelude::*,
 };
 use bevy_enoki::{prelude::*, EnokiPlugin};
+use std::time::Duration;
 
 fn main() {
     App::new()
@@ -15,25 +16,32 @@ fn main() {
         }))
         .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
         .add_plugins(EnokiPlugin)
-        .add_plugins(Particle2dMaterialPlugin::<FireParticleMaterial>::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, (show_fps, move_camera))
+        .add_systems(Update, (show_fps, spawn_particles, move_camera))
         .run();
 }
 
 #[derive(Component)]
 pub struct FpsText;
 
+#[derive(Deref, Component, DerefMut)]
+pub struct MoveTimer(Timer);
+
+#[derive(Deref, Component, DerefMut)]
+pub struct Pcindex(f32);
+
+#[derive(Deref, Resource, DerefMut)]
+pub struct ParticleMaterialAsset(Handle<AtlasParticle2dMaterial>);
+
 fn setup(
     mut cmd: Commands,
-    mut materials: ResMut<Assets<FireParticleMaterial>>,
+    mut materials: ResMut<Assets<AtlasParticle2dMaterial>>,
     server: Res<AssetServer>,
 ) {
     cmd.spawn((
         Camera2d,
         Camera {
             clear_color: ClearColorConfig::Custom(Color::BLACK),
-            hdr: true,
             ..default()
         },
         Bloom {
@@ -42,14 +50,9 @@ fn setup(
         },
     ));
 
-    let material_handle = materials.add(FireParticleMaterial {
-        texture: server.load("noise.png"),
-    });
-
     cmd.spawn((
-        ParticleSpawnerState::default(),
-        ParticleEffectHandle(server.load("ice.particle.ron")),
-        ParticleSpawner(material_handle),
+        MoveTimer(Timer::new(Duration::from_millis(300), TimerMode::Repeating)),
+        Pcindex(0.),
     ));
 
     cmd.spawn((
@@ -60,6 +63,43 @@ fn setup(
         },
         FpsText,
     ));
+    cmd.insert_resource(ParticleMaterialAsset(materials.add(
+        AtlasParticle2dMaterial::from_vec(
+            server.load("particle.png"),
+            Vec4::new(3.0 / 6.0, 0.0, 1.0 / 6.0, 1.0),
+        ),
+    )));
+}
+
+fn spawn_particles(
+    mut cmd: Commands,
+    mut query: Query<(&mut MoveTimer, &mut Pcindex)>,
+    time: Res<Time>,
+    material: Res<ParticleMaterialAsset>,
+    server: Res<AssetServer>,
+) {
+    let Ok((mut timer, mut index)) = query.single_mut() else {
+        return;
+    };
+
+    timer.tick(time.delta());
+    if !timer.finished() {
+        return;
+    }
+
+    for _ in 0..3 {
+        let x = (rand::random::<f32>() - 0.5) * 500.;
+        let y = (rand::random::<f32>() - 0.5) * 500.;
+
+        cmd.spawn((
+            ParticleEffectHandle(server.load("firework.particle.ron")),
+            ParticleSpawner(material.0.clone()),
+            Transform::from_xyz(x, y, index.0),
+            OneShot::Despawn,
+        ));
+
+        index.0 += 1.;
+    }
 }
 
 fn show_fps(
@@ -81,19 +121,6 @@ fn show_fps(
     };
 
     text.0 = format!("O:ZoomOut I:ZoomIn Arrow:Move\nFPS: {fps:.1}\nParticles: {particle_count}");
-}
-
-#[derive(AsBindGroup, Asset, TypePath, Clone, Default)]
-pub struct FireParticleMaterial {
-    #[texture(0)]
-    #[sampler(1)]
-    texture: Handle<Image>,
-}
-
-impl Particle2dMaterial for FireParticleMaterial {
-    fn fragment_shader() -> bevy::render::render_resource::ShaderRef {
-        "custom_material.wgsl".into()
-    }
 }
 
 fn move_camera(
