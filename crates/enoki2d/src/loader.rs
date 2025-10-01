@@ -1,10 +1,14 @@
-use super::ParticleEffectInstance;
-use crate::{Particle2dEffect, ParticleEffectHandle};
-use bevy::{
-    asset::{io::Reader, AssetLoadError, AssetLoader, LoadContext},
-    prelude::*,
+use bevy_asset::{io::Reader, AssetEvent, AssetLoadError, AssetLoader, Assets, LoadContext};
+use bevy_ecs::{
+    component::Component,
+    entity::Entity,
+    event::EventReader,
+    query::With,
+    system::{Commands, Query, Res},
 };
 
+use super::ParticleEffectInstance;
+use crate::{Particle2dEffect, ParticleEffectHandle};
 #[derive(Default)]
 pub struct ParticleEffectLoader;
 impl AssetLoader for ParticleEffectLoader {
@@ -21,7 +25,7 @@ impl AssetLoader for ParticleEffectLoader {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await.unwrap();
         let mut asset = ron::de::from_bytes::<Self::Asset>(bytes.as_slice()).map_err(|e| {
-            error!("Failed to load particle effect asset: {}", e);
+            bevy_log::error!("Failed to load particle effect asset: {}", e);
             AssetLoadError::AssetMetaReadError
         })?;
 

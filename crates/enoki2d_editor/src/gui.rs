@@ -76,6 +76,7 @@ pub(crate) fn scene_gui(ui: &mut Ui, settings: &mut SceneSettings) {
 enum Shape {
     Point,
     Circle,
+    Line,
 }
 
 impl From<Shape> for &'static str {
@@ -83,6 +84,7 @@ impl From<Shape> for &'static str {
         match val {
             Shape::Point => "Point",
             Shape::Circle => "Circle",
+            Shape::Line => "Line",
         }
     }
 }
@@ -99,6 +101,7 @@ impl From<&EmissionShape> for Shape {
         match value {
             EmissionShape::Point => Self::Point,
             EmissionShape::Circle(_) => Self::Circle,
+            EmissionShape::Line(_) => Self::Line,
         }
     }
 }
@@ -107,7 +110,7 @@ fn collapsing_header(text: impl Into<String>) -> egui::CollapsingHeader {
     egui::CollapsingHeader::new(RichText::new(text).strong().size(19.0)).default_open(true)
 }
 
-fn slider<T: Numeric>(value: &mut T, range: RangeInclusive<T>) -> Slider {
+fn slider<'a, T: Numeric>(value: &'a mut T, range: RangeInclusive<T>) -> Slider<'a> {
     Slider::new(value, range)
         .trailing_fill(true)
         .handle_shape(HandleShape::Rect { aspect_ratio: 0.4 })
@@ -147,22 +150,26 @@ pub(crate) fn config_gui(
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut shape, Shape::Point, Shape::Point);
                     ui.selectable_value(&mut shape, Shape::Circle, Shape::Circle);
+                    ui.selectable_value(&mut shape, Shape::Line, Shape::Line);
                 });
             if before != shape {
                 effect.emission_shape = match shape {
                     Shape::Point => EmissionShape::Point,
                     Shape::Circle => EmissionShape::Circle(15.0),
+                    Shape::Line => EmissionShape::Line(15.0),
                 };
             } else {
-                let mut val = match effect.emission_shape {
+                match &mut effect.emission_shape {
                     EmissionShape::Point => {
                         return;
                     }
-                    EmissionShape::Circle(val) => val,
+                    EmissionShape::Circle(val) => {
+                        ui.add(egui::DragValue::new(val));
+                    }
+                    EmissionShape::Line(val) => {
+                        ui.add(egui::DragValue::new(val));
+                    }
                 };
-                if ui.add(egui::DragValue::new(&mut val)).changed() {
-                    effect.emission_shape = EmissionShape::Circle(val);
-                }
             }
         });
         rval_f32_field(ui, "Lifetime", &mut effect.lifetime);

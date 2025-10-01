@@ -1,7 +1,8 @@
-use bevy::{
-    prelude::*,
-    render::render_resource::{AsBindGroup, ShaderType},
-};
+use bevy_asset::Asset;
+use bevy_color::LinearRgba;
+use bevy_math::Vec4;
+use bevy_reflect::TypePath;
+use bevy_render::render_resource::{AsBindGroup, ShaderType};
 
 use super::{prelude::Particle2dMaterial, PARTICLE_COLOR_FRAG};
 
@@ -33,7 +34,7 @@ impl ColorParticle2dMaterial {
 }
 
 impl Particle2dMaterial for ColorParticle2dMaterial {
-    fn fragment_shader() -> bevy::render::render_resource::ShaderRef {
+    fn fragment_shader() -> bevy_render::render_resource::ShaderRef {
         PARTICLE_COLOR_FRAG.into()
     }
 }

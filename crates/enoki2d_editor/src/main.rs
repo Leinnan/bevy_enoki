@@ -86,9 +86,9 @@ fn main() {
         .add_plugins((
             DefaultPlugins
                 .set(LogPlugin {
-                    level: bevy::log::Level::INFO,
                     filter: "wgpu=error,naga=warn".into(),
                     custom_layer: log::log_capture_layer,
+                    ..Default::default()
                 })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
@@ -212,6 +212,13 @@ fn gizmo(
                 gizmos.circle_2d(
                     transform.translation.xy(),
                     radius,
+                    Color::LinearRgba(LinearRgba::RED),
+                );
+            }
+            EmissionShape::Line(length) => {
+                gizmos.line_2d(
+                    transform.translation.xy() - Vec2::new(length / 2.0, 0.0),
+                    transform.translation.xy() + Vec2::new(length / 2.0, 0.0),
                     Color::LinearRgba(LinearRgba::RED),
                 );
             }

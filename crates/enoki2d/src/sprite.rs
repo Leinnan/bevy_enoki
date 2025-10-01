@@ -1,7 +1,12 @@
+use bevy_asset::{Asset, Handle};
+use bevy_image::{Image, TextureAtlasLayout};
+use bevy_math::{UVec4, Vec4};
+use bevy_reflect::TypePath;
+use bevy_render::render_resource::AsBindGroup;
+
 use crate::PARTICLE_ATLAS_SPRITE_FRAG;
 
 use super::{Particle2dMaterial, PARTICLE_SPRITE_FRAG};
-use bevy::{prelude::*, render::render_resource::AsBindGroup};
 
 /// Sprite Material lets you add textures and animations
 /// to particles.
@@ -74,12 +79,12 @@ impl AtlasParticle2dMaterial {
 }
 
 impl Particle2dMaterial for SpriteParticle2dMaterial {
-    fn fragment_shader() -> bevy::render::render_resource::ShaderRef {
+    fn fragment_shader() -> bevy_render::render_resource::ShaderRef {
         PARTICLE_SPRITE_FRAG.into()
     }
 }
 impl Particle2dMaterial for AtlasParticle2dMaterial {
-    fn fragment_shader() -> bevy::render::render_resource::ShaderRef {
+    fn fragment_shader() -> bevy_render::render_resource::ShaderRef {
         PARTICLE_ATLAS_SPRITE_FRAG.into()
     }
 }

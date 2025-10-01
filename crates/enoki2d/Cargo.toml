@@ -11,25 +11,44 @@ readme = "README.md"
 
 [features]
 dev = [
-  "bevy/file_watcher",
-  "bevy/dynamic_linking",
-  "bevy/multi_threaded",
-  "bevy/embedded_watcher",
+  # "bevy/file_watcher",
+  # "bevy/dynamic_linking",
+  # "bevy/multi_threaded",
+  # "bevy/embedded_watcher",
 ]
 trace = [
-  "bevy/trace_tracy",
-  "bevy/trace_tracy_memory",
+    "bevy_app/trace",
+    "bevy_asset/trace",
+    "bevy_render/trace",
+    "bevy_core_pipeline/trace",
+    "bevy_render/tracing-tracy",
+    "bevy_render/tracing-tracy"
 ]
 
 [dependencies]
 bytemuck = { version = "1.5", features = ["derive", "must_cast"] }
-bevy = { version = "0.16", default-features = false, features = [
-  "bevy_core_pipeline",
-  "bevy_asset",
-  "bevy_sprite",
-  "serialize",
-  "png",
-] }
+bevy_asset = { version = "0.16" }
+bevy_core_pipeline = { version = "0.16" }
+bevy_render = { version = "0.16" }
+bevy_sprite = { version = "0.16" }
+bevy_app = { version = "0.16" }
+bevy_ecs = { version = "0.16" }
+bevy_math = { version = "0.16" }
+bevy_reflect = { version = "0.16" }
+bevy_time = { version = "0.16" }
+bevy_derive = { version = "0.16" }
+bevy_transform = { version = "0.16" }
+bevy_color = { version = "0.16" }
+bevy_log = { version = "0.16" }
+bevy_tasks = { version = "0.16" }
+bevy_image = { version = "0.16" }
+# bevy = { version = "0.16", default-features = false, features = [
+#   "bevy_core_pipeline",
+#   "bevy_asset",
+#   "bevy_sprite",
+#   "serialize",
+#   "png",
+# ] }
 serde = { version = "1.0.197", features = ["derive"] }
 ron = "0.10"
 rand = { version = "0.8.5" }

@@ -1,44 +1,52 @@
 use crate::RenderParticleTag;
 
 use super::{ParticleSpawner, ParticleStore};
-use bevy::{
-    core_pipeline::core_2d::{Transparent2d, CORE_2D_DEPTH_FORMAT},
-    ecs::{
-        entity::EntityHashMap,
-        system::{
-            lifetimeless::{Read, SRes},
-            SystemParamItem,
-        },
+use bevy_app::{App, Plugin};
+use bevy_asset::{Asset, AssetApp, AssetEvent, AssetId, AssetServer, Assets, Handle};
+use bevy_core_pipeline::core_2d::{Transparent2d, CORE_2D_DEPTH_FORMAT};
+use bevy_derive::{Deref, DerefMut};
+use bevy_ecs::{
+    component::Component,
+    entity::{Entity, EntityHashMap},
+    event::EventReader,
+    query::With,
+    resource::Resource,
+    schedule::IntoScheduleConfigs,
+    system::{
+        lifetimeless::{Read, SRes},
+        Commands, Query, Res, ResMut, SystemParamItem,
     },
-    math::FloatOrd,
-    prelude::*,
-    render::{
-        mesh::PrimitiveTopology,
-        render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssets},
-        render_phase::{
-            AddRenderCommand, DrawFunctions, PhaseItem, PhaseItemExtraIndex, RenderCommand,
-            RenderCommandResult, SetItemPipeline, TrackedRenderPass, ViewSortedRenderPhases,
-        },
-        render_resource::{
-            binding_types::uniform_buffer, AsBindGroup, AsBindGroupError, BindGroup,
-            BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries, BlendState, BufferUsages,
-            BufferVec, ColorTargetState, ColorWrites, CompareFunction, DepthBiasState,
-            DepthStencilState, FrontFace, IndexFormat, OwnedBindingResource, PipelineCache,
-            PolygonMode, PrimitiveState, RenderPipelineDescriptor, ShaderRef, ShaderStages,
-            ShaderType, SpecializedRenderPipeline, SpecializedRenderPipelines, StencilFaceState,
-            StencilState, TextureFormat, VertexAttribute, VertexBufferLayout, VertexFormat,
-            VertexStepMode,
-        },
-        renderer::{RenderDevice, RenderQueue},
-        sync_world::RenderEntity,
-        view::{
-            ExtractedView, RenderVisibleEntities, ViewTarget, ViewUniform, ViewUniformOffset,
-            ViewUniforms,
-        },
-        Extract, Render, RenderApp, RenderSet,
-    },
-    sprite::Mesh2dPipelineKey,
+    world::{FromWorld, World},
 };
+use bevy_image::BevyDefault;
+use bevy_math::{FloatOrd, Vec4};
+use bevy_reflect::Reflect;
+use bevy_render::{
+    mesh::PrimitiveTopology,
+    render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssets},
+    render_phase::{
+        AddRenderCommand, DrawFunctions, PhaseItem, PhaseItemExtraIndex, RenderCommand,
+        RenderCommandResult, SetItemPipeline, TrackedRenderPass, ViewSortedRenderPhases,
+    },
+    render_resource::{
+        binding_types::uniform_buffer, AsBindGroup, AsBindGroupError, BindGroup, BindGroupEntries,
+        BindGroupLayout, BindGroupLayoutEntries, BlendState, BufferUsages, BufferVec,
+        ColorTargetState, ColorWrites, CompareFunction, DepthBiasState, DepthStencilState,
+        FrontFace, IndexFormat, OwnedBindingResource, PipelineCache, PolygonMode, PrimitiveState,
+        RenderPipelineDescriptor, Shader, ShaderRef, ShaderStages, ShaderType,
+        SpecializedRenderPipeline, SpecializedRenderPipelines, StencilFaceState, StencilState,
+        TextureFormat, VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode,
+    },
+    renderer::{RenderDevice, RenderQueue},
+    sync_world::RenderEntity,
+    view::{
+        ExtractedView, Msaa, RenderVisibleEntities, ViewTarget, ViewUniform, ViewUniformOffset,
+        ViewUniforms, ViewVisibility,
+    },
+    Extract, ExtractSchedule, Render, RenderApp, RenderSet,
+};
+use bevy_sprite::Mesh2dPipelineKey;
+use bevy_transform::components::GlobalTransform;
 use bytemuck::{Pod, Zeroable};
 use std::{hash::Hash, ops::Range};
 
@@ -318,7 +326,7 @@ impl<M: Particle2dMaterial> RenderAsset for PreparedParticleMaterial<M> {
         material: Self::SourceAsset,
         _: AssetId<Self::SourceAsset>,
         (render_device, pipeline, param): &mut SystemParamItem<Self::Param>,
-    ) -> Result<Self, bevy::render::render_asset::PrepareAssetError<Self::SourceAsset>> {
+    ) -> Result<Self, bevy_render::render_asset::PrepareAssetError<Self::SourceAsset>> {
         match material.as_bind_group(&pipeline.uniform_layout, render_device, param) {
             Ok(prepared) => Ok(PreparedParticleMaterial {
                 bind_group: prepared.bind_group,
@@ -472,7 +480,7 @@ impl<M: Particle2dMaterial> SpecializedRenderPipeline for Particle2dPipeline<M> 
 
         RenderPipelineDescriptor {
             zero_initialize_workgroup_memory: true,
-            vertex: bevy::render::render_resource::VertexState {
+            vertex: bevy_render::render_resource::VertexState {
                 shader: self.vertex_shader.clone(),
                 shader_defs: vec![],
                 entry_point: "vertex".into(),
@@ -513,7 +521,7 @@ impl<M: Particle2dMaterial> SpecializedRenderPipeline for Particle2dPipeline<M> 
                     ],
                 }],
             },
-            fragment: Some(bevy::render::render_resource::FragmentState {
+            fragment: Some(bevy_render::render_resource::FragmentState {
                 shader: self.fragment_shader.clone(),
                 shader_defs: vec![],
                 entry_point: "fragment".into(),
@@ -551,7 +559,7 @@ impl<M: Particle2dMaterial> SpecializedRenderPipeline for Particle2dPipeline<M> 
                     clamp: 0.0,
                 },
             }),
-            multisample: bevy::render::render_resource::MultisampleState {
+            multisample: bevy_render::render_resource::MultisampleState {
                 count: key.mesh_key.msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
@@ -609,8 +617,8 @@ impl<const I: usize, M: Particle2dMaterial, P: PhaseItem> RenderCommand<P>
     #[inline]
     fn render<'w>(
         item: &P,
-        _view: bevy::ecs::query::ROQueryItem<'w, Self::ViewQuery>,
-        _item_query: Option<bevy::ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
+        _view: bevy_ecs::query::ROQueryItem<'w, Self::ViewQuery>,
+        _item_query: Option<bevy_ecs::query::ROQueryItem<'w, Self::ItemQuery>>,
         params: SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {

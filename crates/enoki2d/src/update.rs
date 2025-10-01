@@ -1,10 +1,20 @@
 use super::{prelude::EmissionShape, Particle2dEffect, ParticleEffectHandle};
 use crate::{material::InstanceData, values::Random};
-use bevy::{
-    prelude::*,
-    render::primitives::Aabb,
-    tasks::{ComputeTaskPool, ParallelSliceMut},
+use bevy_asset::Assets;
+use bevy_color::LinearRgba;
+use bevy_derive::{Deref, DerefMut};
+use bevy_ecs::{
+    component::Component,
+    entity::Entity,
+    query::{Added, Without},
+    system::{Commands, Query, Res},
 };
+use bevy_math::{Vec2, Vec3};
+use bevy_reflect::Reflect;
+use bevy_render::primitives::Aabb;
+use bevy_tasks::{ComputeTaskPool, ParallelSliceMut};
+use bevy_time::{Time, Timer, TimerMode, Virtual};
+use bevy_transform::components::{GlobalTransform, Transform};
 use bytemuck::{NoUninit, Zeroable};
 use std::{ops::AddAssign, time::Duration};
 
@@ -157,7 +167,7 @@ pub(crate) fn particles_spawn(
                 && state.max_particles > store.particles.len() as u32
             {
                 #[cfg(feature = "trace")]
-                let _span = bevy::log::info_span!("spawn_particles").entered();
+                let _span = bevy_log::info_span!("spawn_particles").entered();
 
                 let transform = transform.compute_transform();
                 for _ in 0..effect.spawn_amount {
@@ -192,7 +202,7 @@ pub(crate) fn update_spawner(
             let delta = time.delta_secs();
             {
                 #[cfg(feature = "trace")]
-                let _span = bevy::log::info_span!("update_particles").entered();
+                let _span = bevy_log::info_span!("update_particles").entered();
                 match (&effect.color_curve, &effect.scale_curve) {
                     (None, None) => {
                         store.par_splat_map_mut(ComputeTaskPool::get(), None, |_, particles| {
@@ -256,12 +266,12 @@ pub(crate) fn update_spawner(
             }
             {
                 #[cfg(feature = "trace")]
-                let _span = bevy::log::info_span!("remove_old_particles").entered();
+                let _span = bevy_log::info_span!("remove_old_particles").entered();
                 store.retain(|particle| particle.duration_fraction < 1.0);
             }
             {
                 #[cfg(feature = "trace")]
-                let _span = bevy::log::info_span!("build_instances_data").entered();
+                let _span = bevy_log::info_span!("build_instances_data").entered();
                 store.update_data();
             }
         });
@@ -362,6 +372,9 @@ fn create_particle(effect: &Particle2dEffect, transform: &Transform) -> Particle
                 .normalize_or_zero()
                 * radius
                 * rand::random::<f32>()
+        }
+        EmissionShape::Line(length) => {
+            Vec3::new(1.0, 0.0, 0.) * length * (rand::random::<f32>() - 0.5)
         }
     };
 

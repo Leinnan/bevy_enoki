@@ -6,15 +6,25 @@ use self::prelude::{
     Particle2dMaterial, ParticleEffectInstance, ParticleSpawnerState, ParticleStore,
 };
 use crate::sprite::{AtlasParticle2dMaterial, SpriteParticle2dMaterial};
-use bevy::{
-    asset::{load_internal_asset, weak_handle},
-    prelude::*,
-    render::{
-        primitives::Aabb,
-        sync_world::SyncToRenderWorld,
-        view::{self, VisibilityClass, VisibilitySystems},
-    },
+use bevy_app::{App, First, Plugin, PostUpdate, Update};
+use bevy_asset::{load_internal_asset, weak_handle, Asset, AssetApp, AssetEvent, Assets, Handle};
+use bevy_color::LinearRgba;
+use bevy_derive::{Deref, DerefMut};
+use bevy_ecs::{
+    component::Component,
+    schedule::{common_conditions::on_event, IntoScheduleConfigs},
 };
+use bevy_math::Vec2;
+use bevy_reflect::{
+    prelude::ReflectDefault, Reflect, ReflectDeserialize, ReflectSerialize, TypePath,
+};
+use bevy_render::{
+    primitives::Aabb,
+    render_resource::Shader,
+    sync_world::SyncToRenderWorld,
+    view::{Visibility, VisibilityClass, VisibilitySystems},
+};
+use bevy_transform::components::Transform;
 use color::ColorParticle2dMaterial;
 use serde::{Deserialize, Serialize};
 use values::Rval;
@@ -167,7 +177,7 @@ pub struct RenderParticleTag;
     SyncToRenderWorld,
     RenderParticleTag
 )]
-#[component(on_add = view::add_visibility_class::<RenderParticleTag>)]
+#[component(on_add = bevy_render::view::add_visibility_class::<RenderParticleTag>)]
 pub struct ParticleSpawner<T: Particle2dMaterial>(pub Handle<T>);
 
 impl<T: Particle2dMaterial> From<Handle<T>> for ParticleSpawner<T> {
@@ -183,11 +193,12 @@ impl Default for ParticleSpawner<ColorParticle2dMaterial> {
 }
 
 #[derive(Deserialize, Reflect, Default, Clone, Debug, Serialize, PartialEq)]
-#[reflect]
+#[reflect(Default, Debug, Serialize, Deserialize)]
 pub enum EmissionShape {
     #[default]
     Point,
     Circle(f32),
+    Line(f32),
 }
 
 /// holds the effect asset. Changing the Asset, will
