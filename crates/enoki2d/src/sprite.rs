@@ -79,12 +79,12 @@ impl AtlasParticle2dMaterial {
 }
 
 impl Particle2dMaterial for SpriteParticle2dMaterial {
-    fn fragment_shader() -> bevy_render::render_resource::ShaderRef {
+    fn fragment_shader() -> bevy_shader::ShaderRef {
         PARTICLE_SPRITE_FRAG.into()
     }
 }
 impl Particle2dMaterial for AtlasParticle2dMaterial {
-    fn fragment_shader() -> bevy_render::render_resource::ShaderRef {
+    fn fragment_shader() -> bevy_shader::ShaderRef {
         PARTICLE_ATLAS_SPRITE_FRAG.into()
     }
 }

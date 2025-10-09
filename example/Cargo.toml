@@ -4,11 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = {version = "0.16.0", features = [
-	"file_watcher", "trace_tracy", "trace_tracy_memory"
-]}
-tracy-client-sys = {version = "0.24.3"}
-bevy_enoki = { path = "../crates/enoki2d", features = ["trace"] }
+bevy = { version = "0.17.1", features = ["file_watcher"] }
+bevy_enoki = { path = "../crates/enoki2d" }
 rand = "0.8.5"
 
 [[bin]]
@@ -26,3 +23,11 @@ path = "src/dynamic.rs"
 [[bin]]
 name = "material"
 path = "src/material.rs"
+
+[[bin]]
+name = "attractor"
+path = "src/attractor.rs"
+
+[[bin]]
+name = "relative_position"
+path = "src/relative_position.rs"

@@ -1,5 +1,7 @@
 use bevy::diagnostic::DiagnosticsStore;
-use bevy::{core_pipeline::bloom::Bloom, log::LogPlugin, prelude::*};
+use bevy::post_process::bloom::Bloom;
+use bevy::render::view::Hdr;
+use bevy::{log::LogPlugin, prelude::*};
 use bevy_egui::egui::{self, Color32, RichText};
 use bevy_egui::egui::{FontFamily, FontId};
 use bevy_egui::EguiPrimaryContextPass;
@@ -26,6 +28,9 @@ pub struct SceneSettings {
     pub show_gizmos: bool,
     pub show_grid: bool,
     pub repeat_playback: bool,
+    pub move_effect: bool,
+    pub move_effect_radius: f32,
+    pub move_effect_speed: f32,
     pub clear_color: Color32,
     pub bloom: Option<BloomSettings>,
 }
@@ -36,6 +41,9 @@ impl Default for SceneSettings {
             show_gizmos: true,
             show_grid: true,
             repeat_playback: true,
+            move_effect: false,
+            move_effect_radius: 150.0,
+            move_effect_speed: 1.0,
             clear_color: Color32::from_rgb(3, 3, 4),
             bloom: None,
         }
@@ -114,6 +122,7 @@ fn main() {
         )
         .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
         .add_systems(Update, gizmo.run_if(gizmos_active))
+        .add_systems(Update, move_spawner)
         .add_systems(
             Update,
             (update_scene, update_spawner).run_if(resource_changed::<SceneSettings>),
@@ -148,13 +157,34 @@ fn gizmos_active(settings: Res<SceneSettings>) -> bool {
     settings.show_gizmos || settings.show_grid
 }
 
+fn move_spawner(
+    time: Res<Time>,
+    settings: Res<SceneSettings>,
+    mut query: Query<&mut Transform, With<Spawner>>,
+) {
+    for mut transform in query.iter_mut() {
+        if settings.move_effect {
+            let t = time.elapsed_secs();
+
+            transform.translation.x =
+                (t * settings.move_effect_speed).cos() * settings.move_effect_radius;
+            transform.translation.y =
+                (t * settings.move_effect_speed).sin() * settings.move_effect_radius;
+            transform.translation.z = 0.0;
+        } else {
+            // Reset to origin when movement is disabled
+            transform.translation = Vec3::ZERO;
+        }
+    }
+}
+
 fn setup(mut cmd: Commands, mut particle_materials: ResMut<Assets<shader::SpriteMaterial>>) {
     cmd.spawn((
         Camera {
-            hdr: true,
             clear_color: ClearColorConfig::Custom(Color::BLACK),
             ..default()
         },
+        Hdr,
         Camera2d,
         Transform::from_scale(Vec3::splat(2.0)),
         Bloom {
@@ -311,11 +341,11 @@ fn gui(
                                 effect,
                                 effect_channel.last_file_name.clone(),
                             );
-                            ui.close_menu();
+                            ui.close();
                         }
                         if ui.button("Load").clicked() {
                             file::open_load_effect_dialog(effect_channel.send.clone());
-                            ui.close_menu();
+                            ui.close();
                         }
                     });
                     #[cfg(not(target_arch = "wasm32"))]
@@ -326,14 +356,14 @@ fn gui(
                         ));
                         if ui.button("New Shader").clicked() {
                             shader::open_shader_save(watcher.clone());
-                            ui.close_menu();
+                            ui.close();
                         }
                         if ui
                             .button(watcher.file_name().unwrap_or("Watch shader".into()))
                             .clicked()
                         {
                             shader::open_shader_dialog(watcher.clone());
-                            ui.close_menu();
+                            ui.close();
                         }
                     });
                     if ui.button("Load Texture").clicked() {
@@ -341,7 +371,7 @@ fn gui(
                             texture_channel.send.clone(),
                             vec!["png".into()],
                         );
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
             });

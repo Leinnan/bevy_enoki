@@ -5,25 +5,26 @@
 use self::prelude::{
     Particle2dMaterial, ParticleEffectInstance, ParticleSpawnerState, ParticleStore,
 };
-use crate::sprite::{AtlasParticle2dMaterial, SpriteParticle2dMaterial};
+use crate::sprite::SpriteParticle2dMaterial;
 use bevy_app::{App, First, Plugin, PostUpdate, Update};
-use bevy_asset::{load_internal_asset, weak_handle, Asset, AssetApp, AssetEvent, Assets, Handle};
+use bevy_asset::{load_internal_asset, uuid_handle, Asset, AssetApp, AssetEvent, Assets, Handle};
+use bevy_camera::{
+    primitives::Aabb,
+    visibility::{add_visibility_class, Visibility, VisibilityClass, VisibilitySystems},
+};
 use bevy_color::LinearRgba;
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     component::Component,
-    schedule::{common_conditions::on_event, IntoScheduleConfigs},
+    schedule::{common_conditions::on_message, IntoScheduleConfigs},
 };
 use bevy_math::Vec2;
 use bevy_reflect::{
-    prelude::ReflectDefault, Reflect, ReflectDeserialize, ReflectSerialize, TypePath,
+    prelude::{ReflectDefault, ReflectDeserialize, ReflectSerialize},
+    Reflect, TypePath,
 };
-use bevy_render::{
-    primitives::Aabb,
-    render_resource::Shader,
-    sync_world::SyncToRenderWorld,
-    view::{Visibility, VisibilityClass, VisibilitySystems},
-};
+use bevy_render::sync_world::SyncToRenderWorld;
+use bevy_shader::Shader;
 use bevy_transform::components::Transform;
 use color::ColorParticle2dMaterial;
 use serde::{Deserialize, Serialize};
@@ -47,21 +48,21 @@ pub mod prelude {
     pub use super::update::{OneShot, ParticleEffectInstance, ParticleSpawnerState, ParticleStore};
     pub use super::values::{Random, Rval};
     pub use super::{
-        EmissionShape, EnokiPlugin, NoAutoAabb, Particle2dEffect, ParticleEffectHandle,
+        Attractor, EmissionShape, EnokiPlugin, NoAutoAabb, Particle2dEffect, ParticleEffectHandle,
         ParticleSpawner,
     };
 }
 
 pub(crate) const PARTICLE_VERTEX_OUT: Handle<Shader> =
-    weak_handle!("8d6bc2d4-7577-4890-a3a4-0faea3a27448");
+    uuid_handle!("8d6bc2d4-7577-4890-a3a4-0faea3a27448");
 pub(crate) const PARTICLE_VERTEX: Handle<Shader> =
-    weak_handle!("57c98346-305c-461a-8cdc-7b3fac8be0ca");
+    uuid_handle!("57c98346-305c-461a-8cdc-7b3fac8be0ca");
 pub(crate) const PARTICLE_COLOR_FRAG: Handle<Shader> =
-    weak_handle!("f60a0cf3-19d3-4425-b6f8-b06bf7ba2f34");
+    uuid_handle!("f60a0cf3-19d3-4425-b6f8-b06bf7ba2f34");
 pub(crate) const PARTICLE_SPRITE_FRAG: Handle<Shader> =
-    weak_handle!("9b13ccf9-eea1-4515-bdd1-1b4131368f71");
+    uuid_handle!("9b13ccf9-eea1-4515-bdd1-1b4131368f71");
 pub(crate) const PARTICLE_ATLAS_SPRITE_FRAG: Handle<Shader> =
-    weak_handle!("9b13ccf9-eea1-4511-bdd1-1b4131368f71");
+    uuid_handle!("9b13ccf9-eea1-4511-bdd1-1b4131368f71");
 
 pub struct EnokiPlugin;
 impl Plugin for EnokiPlugin {
@@ -101,7 +102,9 @@ impl Plugin for EnokiPlugin {
         );
 
         app.add_plugins(material::Particle2dMaterialPlugin::<SpriteParticle2dMaterial>::default());
-        app.add_plugins(material::Particle2dMaterialPlugin::<AtlasParticle2dMaterial>::default());
+        app.add_plugins(material::Particle2dMaterialPlugin::<
+            crate::prelude::AtlasParticle2dMaterial,
+        >::default());
         app.add_plugins(material::Particle2dMaterialPlugin::<ColorParticle2dMaterial>::default());
 
         app.register_type::<update::ParticleStore>();
@@ -111,14 +114,16 @@ impl Plugin for EnokiPlugin {
         app.init_asset::<Particle2dEffect>();
         app.init_asset_loader::<loader::ParticleEffectLoader>();
 
-        app.world_mut()
+        let _ = app
+            .world_mut()
             .resource_mut::<Assets<ColorParticle2dMaterial>>()
             .insert(
                 &Handle::<ColorParticle2dMaterial>::default(),
                 ColorParticle2dMaterial::default(),
             );
 
-        app.world_mut()
+        let _ = app
+            .world_mut()
             .resource_mut::<Assets<Particle2dEffect>>()
             .insert(
                 &Handle::<Particle2dEffect>::default(),
@@ -127,7 +132,7 @@ impl Plugin for EnokiPlugin {
 
         app.add_systems(
             First,
-            loader::on_asset_loaded.run_if(on_event::<AssetEvent<Particle2dEffect>>),
+            loader::on_asset_loaded.run_if(on_message::<AssetEvent<Particle2dEffect>>),
         );
         app.add_systems(
             Update,
@@ -161,6 +166,7 @@ pub struct NoAutoAabb;
 /// tag component for visibilty check
 #[derive(Clone, Component, Default)]
 #[require(VisibilityClass)]
+#[component(on_add = add_visibility_class::<RenderParticleTag>)]
 pub struct RenderParticleTag;
 
 /// The main particle spawner components
@@ -177,7 +183,7 @@ pub struct RenderParticleTag;
     SyncToRenderWorld,
     RenderParticleTag
 )]
-#[component(on_add = bevy_render::view::add_visibility_class::<RenderParticleTag>)]
+#[component(on_add = bevy_camera::visibility::add_visibility_class::<RenderParticleTag>)]
 pub struct ParticleSpawner<T: Particle2dMaterial>(pub Handle<T>);
 
 impl<T: Particle2dMaterial> From<Handle<T>> for ParticleSpawner<T> {
@@ -199,6 +205,13 @@ pub enum EmissionShape {
     Point,
     Circle(f32),
     Line(f32),
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Reflect)]
+pub struct Attractor {
+    pub position: Vec2,
+    pub strength: f32,
+    pub min_distance: f32,
 }
 
 /// holds the effect asset. Changing the Asset, will
@@ -234,6 +247,9 @@ pub struct Particle2dEffect {
     pub angular_damp: Option<Rval<f32>>,
     pub scale_curve: Option<curve::MultiCurve<f32>>,
     pub color_curve: Option<curve::MultiCurve<LinearRgba>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attractors: Vec<Attractor>,
+    pub relative_positioning: Option<bool>,
 }
 
 impl Default for Particle2dEffect {
@@ -256,6 +272,8 @@ impl Default for Particle2dEffect {
             angular_damp: None,
             scale_curve: None,
             color_curve: None,
+            attractors: vec![],
+            relative_positioning: None,
         }
     }
 }

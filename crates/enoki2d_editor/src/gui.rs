@@ -1,7 +1,7 @@
 #![allow(unused)]
 use std::ops::RangeInclusive;
 
-use bevy::{core_pipeline::bloom::Bloom, prelude::*};
+use bevy::prelude::*;
 use bevy_egui::{
     egui::{
         self, emath::Numeric, style::HandleShape, Color32, ColorImage, Pos2, Rect, RichText,
@@ -23,6 +23,20 @@ pub(crate) fn scene_gui(ui: &mut Ui, settings: &mut SceneSettings) {
                 ui,
                 &mut settings.clear_color,
                 egui::color_picker::Alpha::Opaque,
+            );
+            ui.end_row();
+            ui.checkbox(&mut settings.move_effect, "Move Effect");
+            ui.end_row();
+            ui.label("Move Radius");
+            ui.add_enabled(
+                settings.move_effect,
+                egui::Slider::new(&mut settings.move_effect_radius, 0.0..=1000.0),
+            );
+            ui.end_row();
+            ui.label("Move Speed");
+            ui.add_enabled(
+                settings.move_effect,
+                egui::Slider::new(&mut settings.move_effect_speed, 0.1..=5.0),
             );
             ui.end_row();
             ui.label(RichText::new("Bloom Settings").strong());
@@ -139,6 +153,11 @@ pub(crate) fn config_gui(
         slider_field(ui, "Amount", &mut effect.spawn_amount, 1..=1000000);
         slider_field(ui, "Spawn rate", &mut effect.spawn_rate, (0.01)..=120.);
 
+        // Relative positioning checkbox
+        let mut relative_positioning = effect.relative_positioning.unwrap_or(false);
+        ui.checkbox(&mut relative_positioning, "Relative Positioning");
+        effect.relative_positioning = Some(relative_positioning);
+
         ui.label("Emission type");
 
         ui.horizontal(|ui| {
@@ -233,6 +252,75 @@ pub(crate) fn config_gui(
             rval_f32_field(ui, "Speed", grav);
         } else {
             effect.gravity_speed = Some(Rval::default());
+        }
+    });
+
+    ui.separator();
+    collapsing_header("Attractors").show(ui, |ui| {
+        if !effect.attractors.is_empty() {
+            let mut to_remove: Option<usize> = None;
+
+            for (i, attractor) in effect.attractors.iter_mut().enumerate() {
+                egui::Grid::new(format!("attractor_{i}"))
+                    .spacing([4., 4.])
+                    .min_col_width(80.)
+                    .num_columns(3)
+                    .show(ui, |ui| {
+                        ui.label(format!("Attractor {}", i + 1));
+
+                        if ui.button("🗑").clicked() {
+                            to_remove = Some(i);
+                        }
+                        ui.end_row();
+
+                        ui.label("Position");
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::DragValue::new(&mut attractor.position.x)
+                                    .prefix("X: ")
+                                    .speed(1.0),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut attractor.position.y)
+                                    .prefix("Y: ")
+                                    .speed(1.0),
+                            );
+                        });
+                        ui.end_row();
+
+                        ui.label("Strength");
+                        ui.add(
+                            slider(&mut attractor.strength, 0.0..=100000000.0).logarithmic(true),
+                        );
+                        ui.end_row();
+
+                        ui.label("Min Distance");
+                        ui.add(slider(&mut attractor.min_distance, 0.1..=100.0));
+                        ui.end_row();
+                    });
+                ui.separator();
+            }
+
+            if let Some(index) = to_remove {
+                effect.attractors.remove(index);
+            }
+
+            if ui.button("Add Attractor").clicked() {
+                effect.attractors.push(Attractor {
+                    position: Vec2::new(0.0, 0.0),
+                    strength: 10000.0,
+                    min_distance: 5.0,
+                });
+            }
+        } else {
+            ui.label("No attractors defined");
+            if ui.button("Add First Attractor").clicked() {
+                effect.attractors = vec![Attractor {
+                    position: Vec2::new(0.0, 0.0),
+                    strength: 10000.0,
+                    min_distance: 5.0,
+                }];
+            }
         }
     });
 
