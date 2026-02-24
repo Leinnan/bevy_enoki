@@ -9,7 +9,7 @@ use bevy_ecs::{
     system::{Commands, Query, Res},
 };
 
-#[derive(Default)]
+#[derive(Default, TypePath)]
 pub struct ParticleEffectLoader;
 impl AssetLoader for ParticleEffectLoader {
     type Asset = Particle2dEffect;

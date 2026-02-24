@@ -1,6 +1,6 @@
 [package]
 name = "bevy_enoki"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 authors = ["Lorenz Mielke"]
 description = "2D Particle system plugin, that works well on wasm and mobile"
@@ -21,28 +21,28 @@ dev = [
 trace = []
 
 [dependencies]
-bevy_asset = { version = "0.17" }
-bevy_core_pipeline = { version = "0.17" }
-bevy_render = { version = "0.17" }
-bevy_sprite = { version = "0.17" }
-bevy_sprite_render = { version = "0.17" }
-bevy_mesh = { version = "0.17" }
-bevy_app = { version = "0.17" }
-bevy_ecs = { version = "0.17" }
-bevy_math = { version = "0.17" }
-bevy_reflect = { version = "0.17" }
-bevy_time = { version = "0.17" }
-bevy_derive = { version = "0.17" }
-bevy_transform = { version = "0.17" }
-bevy_color = { version = "0.17" }
-bevy_log = { version = "0.17" }
-bevy_tasks = { version = "0.17" }
-bevy_image = { version = "0.17" }
-bevy_camera = { version = "0.17" }
-bevy_shader = { version = "0.17" }
+bevy_asset = { version = "0.18" }
+bevy_core_pipeline = { version = "0.18" }
+bevy_render = { version = "0.18" }
+bevy_sprite = { version = "0.18" }
+bevy_sprite_render = { version = "0.18" }
+bevy_mesh = { version = "0.18" }
+bevy_app = { version = "0.18" }
+bevy_ecs = { version = "0.18" }
+bevy_math = { version = "0.18" }
+bevy_reflect = { version = "0.18" }
+bevy_time = { version = "0.18" }
+bevy_derive = { version = "0.18" }
+bevy_transform = { version = "0.18" }
+bevy_color = { version = "0.18" }
+bevy_log = { version = "0.18" }
+bevy_tasks = { version = "0.18" }
+bevy_image = { version = "0.18" }
+bevy_camera = { version = "0.18" }
+bevy_shader = { version = "0.18" }
 bytemuck = { version = "1.5", features = ["derive", "must_cast"] }
 serde = { version = "1.0.197", features = ["derive"] }
-ron = "0.10"
+ron = "0.12"
 rand = { version = "0.8.5" }
 
 [target.wasm32-unknown-unknown.dependencies]
