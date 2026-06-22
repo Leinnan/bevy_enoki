@@ -19,7 +19,6 @@ use bevy_ecs::{
     },
     world::{FromWorld, World},
 };
-use bevy_image::BevyDefault;
 use bevy_math::{FloatOrd, Vec4};
 use bevy_mesh::{PrimitiveTopology, VertexBufferLayout};
 use bevy_reflect::Reflect;
@@ -35,14 +34,13 @@ use bevy_render::{
         ColorTargetState, ColorWrites, CompareFunction, DepthBiasState, DepthStencilState,
         FrontFace, IndexFormat, OwnedBindingResource, PipelineCache, PolygonMode, PrimitiveState,
         RenderPipelineDescriptor, ShaderStages, ShaderType, SpecializedRenderPipeline,
-        SpecializedRenderPipelines, StencilFaceState, StencilState, TextureFormat, VertexAttribute,
-        VertexFormat, VertexStepMode,
+        SpecializedRenderPipelines, StencilFaceState, StencilState, VertexAttribute, VertexFormat,
+        VertexStepMode,
     },
     renderer::{RenderDevice, RenderQueue},
     sync_world::RenderEntity,
     view::{
-        ExtractedView, Msaa, RenderVisibleEntities, ViewTarget, ViewUniform, ViewUniformOffset,
-        ViewUniforms,
+        ExtractedView, Msaa, RenderVisibleEntities, ViewUniform, ViewUniformOffset, ViewUniforms,
     },
     Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
 };
@@ -239,12 +237,16 @@ fn queue_particles<M: Particle2dMaterial>(
         };
 
         let mesh_key = Mesh2dPipelineKey::from_msaa_samples(msaa.samples())
-            | Mesh2dPipelineKey::from_hdr(view.hdr);
+            | Mesh2dPipelineKey::from_target_format(view.target_format);
 
         let key = Particle2dPipelineKey { mesh_key };
         let pipeline = pipelines.specialize(&pipeline_cache, &custom_pipeline, key);
 
-        for (entity, main_entity) in visible_entities.get::<RenderParticleTag>().iter() {
+        let Some(visible_entities) = visible_entities.get::<RenderParticleTag>() else {
+            continue;
+        };
+
+        for (entity, main_entity) in visible_entities.iter_visible() {
             if extract_particles.particles.get(entity).is_none() {
                 continue;
             }
@@ -253,7 +255,7 @@ fn queue_particles<M: Particle2dMaterial>(
                 return;
             };
 
-            transparent_phase.add(Transparent2d {
+            transparent_phase.add_transient(Transparent2d {
                 extracted_index: 0,
                 indexed: false,
                 extra_index: PhaseItemExtraIndex::None,
@@ -476,12 +478,6 @@ impl<M: Particle2dMaterial> SpecializedRenderPipeline for Particle2dPipeline<M> 
     fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
         let layout = vec![self.view_layout.clone(), self.uniform_layout.clone()];
 
-        let format = if key.mesh_key.contains(Mesh2dPipelineKey::HDR) {
-            ViewTarget::TEXTURE_FORMAT_HDR
-        } else {
-            TextureFormat::bevy_default()
-        };
-
         RenderPipelineDescriptor {
             zero_initialize_workgroup_memory: true,
             vertex: bevy_render::render_resource::VertexState {
@@ -530,14 +526,14 @@ impl<M: Particle2dMaterial> SpecializedRenderPipeline for Particle2dPipeline<M> 
                 shader_defs: vec![],
                 entry_point: Some("fragment".into()),
                 targets: vec![Some(ColorTargetState {
-                    format,
+                    format: key.mesh_key.target_format(),
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
             }),
             label: Some("particle 2d pipeline".into()),
             layout,
-            push_constant_ranges: vec![],
+            immediate_size: 0,
             primitive: PrimitiveState {
                 front_face: FrontFace::Ccw,
                 cull_mode: None,
@@ -549,8 +545,8 @@ impl<M: Particle2dMaterial> SpecializedRenderPipeline for Particle2dPipeline<M> 
             },
             depth_stencil: Some(DepthStencilState {
                 format: CORE_2D_DEPTH_FORMAT,
-                depth_write_enabled: false,
-                depth_compare: CompareFunction::GreaterEqual,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(CompareFunction::GreaterEqual),
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,

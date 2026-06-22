@@ -1,5 +1,5 @@
 use bevy::{
-    diagnostic::DiagnosticsStore, post_process::bloom::Bloom, prelude::*, render::view::Hdr,
+    camera::Hdr, diagnostic::DiagnosticsStore, post_process::bloom::Bloom, prelude::*,
     text::LineHeight,
 };
 use bevy_enoki::prelude::ParticleStore;
@@ -92,7 +92,7 @@ fn debug_ui() -> impl Bundle {
             LineHeight::Px(24.),
             text_shadow,
             primary_color,
-            TextLayout::new_with_justify(Justify::Right),
+            TextLayout::justify(Justify::Right),
             Node {
                 min_width: Val::Px(50.0),
                 ..Default::default()
