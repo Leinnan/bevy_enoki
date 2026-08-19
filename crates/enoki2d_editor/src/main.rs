@@ -1,6 +1,6 @@
+use bevy::camera::Hdr;
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::post_process::bloom::Bloom;
-use bevy::render::view::Hdr;
 use bevy::{log::LogPlugin, prelude::*};
 use bevy_egui::egui::{self, Color32, RichText};
 use bevy_egui::egui::{FontFamily, FontId};

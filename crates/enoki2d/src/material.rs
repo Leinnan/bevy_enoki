@@ -1,10 +1,9 @@
 use crate::RenderParticleTag;
 
-use super::{update::Particle, ParticleSpawner, ParticleStore};
+use super::{ParticleSpawner, ParticleStore};
 use bevy_app::{App, Plugin};
 use bevy_asset::{Asset, AssetApp, AssetEvent, AssetId, AssetServer, Assets, Handle};
 use bevy_camera::visibility::ViewVisibility;
-use bevy_color::ColorToComponents;
 use bevy_core_pipeline::core_2d::{Transparent2d, CORE_2D_DEPTH_FORMAT};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
@@ -19,7 +18,6 @@ use bevy_ecs::{
     },
     world::{FromWorld, World},
 };
-use bevy_image::BevyDefault;
 use bevy_math::{FloatOrd, Vec4};
 use bevy_mesh::{PrimitiveTopology, VertexBufferLayout};
 use bevy_reflect::Reflect;
@@ -35,14 +33,13 @@ use bevy_render::{
         ColorTargetState, ColorWrites, CompareFunction, DepthBiasState, DepthStencilState,
         FrontFace, IndexFormat, OwnedBindingResource, PipelineCache, PolygonMode, PrimitiveState,
         RenderPipelineDescriptor, ShaderStages, ShaderType, SpecializedRenderPipeline,
-        SpecializedRenderPipelines, StencilFaceState, StencilState, TextureFormat, VertexAttribute,
-        VertexFormat, VertexStepMode,
+        SpecializedRenderPipelines, StencilFaceState, StencilState, VertexAttribute, VertexFormat,
+        VertexStepMode,
     },
     renderer::{RenderDevice, RenderQueue},
     sync_world::RenderEntity,
     view::{
-        ExtractedView, Msaa, RenderVisibleEntities, ViewTarget, ViewUniform, ViewUniformOffset,
-        ViewUniforms,
+        ExtractedView, Msaa, RenderVisibleEntities, ViewUniform, ViewUniformOffset, ViewUniforms,
     },
     Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
 };
@@ -84,12 +81,7 @@ impl<M: Particle2dMaterial> Plugin for Particle2dMaterialPlugin<M> {
             .init_resource::<RenderParticleMaterials<M>>()
             .add_systems(
                 ExtractSchedule,
-                (
-                    remove_z_order,
-                    extract_particles::<M>,
-                    extract_materials::<M>,
-                )
-                    .chain(),
+                (extract_particles::<M>, extract_materials::<M>),
             )
             .add_systems(
                 Render,
@@ -141,7 +133,7 @@ impl<M: Particle2dMaterial> Default for ExtractedParticleMaterials<M> {
 
 #[derive(Resource, Debug)]
 pub struct ExtracedParticleSpawner<M: Particle2dMaterial> {
-    particles: EntityHashMap<Vec<InstanceData>>,
+    particles: EntityHashMap<Range<u32>>,
     _m: std::marker::PhantomData<M>,
 }
 
@@ -176,21 +168,12 @@ fn extract_materials<M: Particle2dMaterial>(
         }
     }
 }
-
-fn remove_z_order(
-    mut commands: Commands,
-    query: Query<bevy_ecs::prelude::Entity, bevy_ecs::prelude::With<ZOrder>>,
-) {
-    for entity in query.iter() {
-        commands.entity(entity).remove::<ZOrder>();
-    }
-}
-
 #[allow(clippy::type_complexity)]
 fn extract_particles<M: Particle2dMaterial>(
     mut cmd: Commands,
     mut extraced_batches: ResMut<ExtracedParticleSpawner<M>>,
     mut render_material_instances: ResMut<RenderParticleMaterials<M>>,
+    mut particle_buffer: ResMut<InstanceBuffer<M>>,
     query: Extract<
         Query<(
             &ParticleStore,
@@ -201,42 +184,32 @@ fn extract_particles<M: Particle2dMaterial>(
         )>,
     >,
 ) {
-    extraced_batches.particles.iter_mut().for_each(|(e, data)| {
-        let Some(emitter) = query.iter().find(|it| e.eq(&**it.4)) else {
-            data.clear();
-            return;
-        };
-        let (particle_store, global, material_handle, visbility, render_entity) = emitter;
-        if !visbility.get() || particle_store.is_empty() {
-            data.clear();
-            return;
-        }
-        cmd.entity(**render_entity)
-            .insert(ZOrder(FloatOrd(global.translation().z)));
-        render_material_instances.insert(**render_entity, material_handle.id());
-        if data.len() != particle_store.particles_data.len() {
-            data.resize(particle_store.particles_data.len(), Default::default());
-        }
-        data.clone_from_slice(&particle_store.particles_data);
-    });
+    extraced_batches.particles.clear();
+    particle_buffer.instance_buffer.clear();
     query.iter().for_each(|emitter| {
         let (particle_store, global, material_handle, visbility, render_entity) = emitter;
-        if extraced_batches.particles.contains_key(&**render_entity)
-            || !visbility.get()
-            || particle_store.is_empty()
-        {
+        if !visbility.get() || particle_store.is_empty() {
             return;
         }
 
         cmd.entity(**render_entity)
-            .insert(ZOrder(FloatOrd(global.translation().z)));
+            .insert((ZOrder(FloatOrd(global.translation().z)), ParticleTag));
+        let start = particle_buffer.instance_buffer.len() as u32;
+        for index in 0..particle_store.len() {
+            particle_buffer
+                .instance_buffer
+                .push(InstanceData::from_store(particle_store, index));
+        }
+        let end = particle_buffer.instance_buffer.len() as u32;
         render_material_instances.insert(**render_entity, material_handle.id());
         extraced_batches
             .particles
-            .insert(**render_entity, particle_store.particles_data.clone());
+            .insert(**render_entity, start..end);
     });
-    extraced_batches.particles.retain(|_, d| !d.is_empty());
 }
+
+#[derive(Component, Default)]
+pub struct ParticleTag;
 
 #[derive(Component, Deref)]
 pub struct ZOrder(FloatOrd);
@@ -264,21 +237,25 @@ fn queue_particles<M: Particle2dMaterial>(
         };
 
         let mesh_key = Mesh2dPipelineKey::from_msaa_samples(msaa.samples())
-            | Mesh2dPipelineKey::from_hdr(view.hdr);
+            | Mesh2dPipelineKey::from_target_format(view.target_format);
 
         let key = Particle2dPipelineKey { mesh_key };
         let pipeline = pipelines.specialize(&pipeline_cache, &custom_pipeline, key);
 
-        for (entity, main_entity) in visible_entities.get::<RenderParticleTag>().iter() {
+        let Some(visible_entities) = visible_entities.get::<RenderParticleTag>() else {
+            continue;
+        };
+
+        for (entity, main_entity) in visible_entities.iter_visible() {
             if extract_particles.particles.get(entity).is_none() {
                 continue;
             }
 
             let Ok(order) = z_orders.get(*entity) else {
-                continue;
+                return;
             };
 
-            transparent_phase.add(Transparent2d {
+            transparent_phase.add_transient(Transparent2d {
                 extracted_index: 0,
                 indexed: false,
                 extra_index: PhaseItemExtraIndex::None,
@@ -295,34 +272,124 @@ fn queue_particles<M: Particle2dMaterial>(
 // ----------------------------------------------
 //
 
-// #[derive(Clone, Debug, Copy, ShaderType, Reflect)]
-#[derive(Clone, Debug, Copy, ShaderType, Reflect, bytemuck::Pod, bytemuck::Zeroable, Default)]
-#[repr(C)]
+#[derive(Clone, Debug, Copy, ShaderType, Reflect)]
 pub struct InstanceData {
-    pub transform: [Vec4; 3],
-    pub color: [f32; 4],
-    pub custom: Vec4,
+    transform: Vec4,
+    scale_lifetime: Vec4,
+    color: Vec4,
 }
 
-impl From<&Particle> for InstanceData {
+impl InstanceData {
     #[inline(always)]
-    fn from(value: &Particle) -> Self {
-        let transpose_model_3x3 = value.transform.compute_affine().matrix3.transpose();
+    fn from_store(store: &ParticleStore, index: usize) -> Self {
         Self {
-            transform: [
-                transpose_model_3x3
-                    .x_axis
-                    .extend(value.transform.translation.x),
-                transpose_model_3x3
-                    .y_axis
-                    .extend(value.transform.translation.y),
-                transpose_model_3x3
-                    .z_axis
-                    .extend(value.transform.translation.z),
-            ],
-            color: value.color.to_f32_array(),
-            custom: Vec4::new(value.duration_fraction, value.duration, 0., 0.),
+            // xyz is world position, including depth; w is the 2D angle.
+            transform: Vec4::new(
+                store.position_x[index],
+                store.position_y[index],
+                store.position_z[index],
+                store.rotation[index],
+            ),
+            scale_lifetime: Vec4::new(
+                store.scale_x[index],
+                store.scale_y[index],
+                store.duration_fraction[index],
+                store.duration[index],
+            ),
+            color: Vec4::new(
+                store.color_r[index],
+                store.color_g[index],
+                store.color_b[index],
+                store.color_a[index],
+            ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        hint::black_box,
+        time::{Duration, Instant},
+    };
+
+    #[test]
+    #[ignore = "manual performance benchmark"]
+    fn bench_pack_one_million_particles_into_render_buffer() {
+        const PARTICLES: usize = 1_000_000;
+        const WARMUP: usize = 3;
+        const SAMPLES: usize = 20;
+
+        let store = ParticleStore {
+            position_x: vec![1.0; PARTICLES],
+            position_y: vec![2.0; PARTICLES],
+            position_z: vec![3.0; PARTICLES],
+            rotation: vec![0.5; PARTICLES],
+            scale_x: vec![1.0; PARTICLES],
+            scale_y: vec![1.0; PARTICLES],
+            duration: vec![10.0; PARTICLES],
+            duration_fraction: vec![0.5; PARTICLES],
+            color_r: vec![1.0; PARTICLES],
+            color_g: vec![0.5; PARTICLES],
+            color_b: vec![0.25; PARTICLES],
+            color_a: vec![1.0; PARTICLES],
+            ..Default::default()
+        };
+        let mut buffer = BufferVec::new(BufferUsages::VERTEX);
+
+        let pack = |buffer: &mut BufferVec<InstanceData>| {
+            buffer.clear();
+            for index in 0..store.len() {
+                buffer.push(InstanceData::from_store(&store, index));
+            }
+        };
+
+        for _ in 0..WARMUP {
+            pack(black_box(&mut buffer));
+        }
+
+        let mut samples = Vec::with_capacity(SAMPLES);
+        for _ in 0..SAMPLES {
+            let start = Instant::now();
+            pack(black_box(&mut buffer));
+            samples.push(start.elapsed());
+            black_box(&buffer);
+        }
+        samples.sort_unstable();
+
+        let median = samples[SAMPLES / 2];
+        let total: Duration = samples.iter().sum();
+        let average = total / SAMPLES as u32;
+        let throughput = PARTICLES as f64 / median.as_secs_f64() / 1_000_000.0;
+
+        println!(
+            "pack 1,000,000 particles: median {median:?}, average {average:?}, {throughput:.2} M particles/s"
+        );
+    }
+
+    #[test]
+    fn compact_instance_preserves_particle_data() {
+        assert_eq!(u64::from(InstanceData::min_size()), 48);
+
+        let mut store = ParticleStore::default();
+        store.position_x.push(1.0);
+        store.position_y.push(2.0);
+        store.position_z.push(3.0);
+        store.rotation.push(0.5);
+        store.scale_x.push(4.0);
+        store.scale_y.push(5.0);
+        store.scale_z.push(6.0);
+        store.duration.push(10.0);
+        store.duration_fraction.push(0.25);
+        store.color_r.push(1.0);
+        store.color_g.push(0.5);
+        store.color_b.push(0.25);
+        store.color_a.push(1.0);
+
+        let instance = InstanceData::from_store(&store, 0);
+        assert_eq!(instance.transform, Vec4::new(1.0, 2.0, 3.0, 0.5));
+        assert_eq!(instance.scale_lifetime, Vec4::new(4.0, 5.0, 0.25, 10.0));
     }
 }
 
@@ -344,6 +411,7 @@ impl<M: Particle2dMaterial> RenderAsset for PreparedParticleMaterial<M> {
         SRes<Particle2dPipeline<M>>,
         M::Param,
     );
+
     fn prepare_asset(
         material: Self::SourceAsset,
         _: AssetId<Self::SourceAsset>,
@@ -381,9 +449,10 @@ impl<M: Particle2dMaterial> Default for RenderParticleMaterials<M> {
 // -----------------------------------
 // #prep
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_particles_instance_buffers<M: Particle2dMaterial>(
     mut cmd: Commands,
-    mut extracted_spawner: ResMut<ExtracedParticleSpawner<M>>,
+    extracted_spawner: Res<ExtracedParticleSpawner<M>>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     view_uniforms: Res<ViewUniforms>,
@@ -399,24 +468,13 @@ fn prepare_particles_instance_buffers<M: Particle2dMaterial>(
         ));
     }
 
-    particle_buffer.instance_buffer.clear();
-    let mut index = 0;
-
-    for (entity, instances) in extracted_spawner.particles.iter_mut() {
-        if instances.is_empty() {
+    for (entity, range) in extracted_spawner.particles.iter() {
+        if range.is_empty() {
             continue;
         }
-
-        let batch = ParticleInstanceBatch {
-            range: index..index + instances.len() as u32,
-        };
-
-        index += instances.len() as u32;
-        instances.drain(..).for_each(|i| {
-            particle_buffer.instance_buffer.push(i);
+        cmd.entity(*entity).insert(ParticleInstanceBatch {
+            range: range.clone(),
         });
-
-        cmd.entity(*entity).insert(batch);
     }
 
     particle_buffer
@@ -476,6 +534,7 @@ impl<M: Particle2dMaterial> FromWorld for Particle2dPipeline<M> {
 
         let vertex_shader = super::PARTICLE_VERTEX;
         let render_device = world.resource::<RenderDevice>();
+
         let view_layout = BindGroupLayoutDescriptor::new(
             "particle_view_layout",
             &BindGroupLayoutEntries::single(
@@ -500,12 +559,6 @@ impl<M: Particle2dMaterial> SpecializedRenderPipeline for Particle2dPipeline<M> 
     fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
         let layout = vec![self.view_layout.clone(), self.uniform_layout.clone()];
 
-        let format = if key.mesh_key.contains(Mesh2dPipelineKey::HDR) {
-            ViewTarget::TEXTURE_FORMAT_HDR
-        } else {
-            TextureFormat::bevy_default()
-        };
-
         RenderPipelineDescriptor {
             zero_initialize_workgroup_memory: true,
             vertex: bevy_render::render_resource::VertexState {
@@ -513,38 +566,26 @@ impl<M: Particle2dMaterial> SpecializedRenderPipeline for Particle2dPipeline<M> 
                 shader_defs: vec![],
                 entry_point: Some("vertex".into()),
                 buffers: vec![VertexBufferLayout {
-                    array_stride: 80,
+                    array_stride: 48,
                     step_mode: VertexStepMode::Instance,
                     attributes: vec![
-                        // translation
+                        // xyz position, z retains particle depth; w rotation
                         VertexAttribute {
                             format: VertexFormat::Float32x4,
                             offset: 0,
                             shader_location: 0,
                         },
-                        // rotation
+                        // xy scale, zw lifetime
                         VertexAttribute {
                             format: VertexFormat::Float32x4,
                             offset: 16,
                             shader_location: 1,
                         },
-                        // scale
+                        // color
                         VertexAttribute {
                             format: VertexFormat::Float32x4,
                             offset: 32,
                             shader_location: 2,
-                        },
-                        // color
-                        VertexAttribute {
-                            format: VertexFormat::Float32x4,
-                            offset: 48,
-                            shader_location: 3,
-                        },
-                        // custom
-                        VertexAttribute {
-                            format: VertexFormat::Float32x4,
-                            offset: 64,
-                            shader_location: 4,
                         },
                     ],
                 }],
@@ -554,14 +595,14 @@ impl<M: Particle2dMaterial> SpecializedRenderPipeline for Particle2dPipeline<M> 
                 shader_defs: vec![],
                 entry_point: Some("fragment".into()),
                 targets: vec![Some(ColorTargetState {
-                    format,
+                    format: key.mesh_key.target_format(),
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
             }),
             label: Some("particle 2d pipeline".into()),
             layout,
-            push_constant_ranges: vec![],
+            immediate_size: 0,
             primitive: PrimitiveState {
                 front_face: FrontFace::Ccw,
                 cull_mode: None,
@@ -573,8 +614,8 @@ impl<M: Particle2dMaterial> SpecializedRenderPipeline for Particle2dPipeline<M> 
             },
             depth_stencil: Some(DepthStencilState {
                 format: CORE_2D_DEPTH_FORMAT,
-                depth_write_enabled: false,
-                depth_compare: CompareFunction::GreaterEqual,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(CompareFunction::GreaterEqual),
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,

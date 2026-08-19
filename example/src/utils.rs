@@ -1,5 +1,5 @@
 use bevy::{
-    diagnostic::DiagnosticsStore, post_process::bloom::Bloom, prelude::*, render::view::Hdr,
+    camera::Hdr, diagnostic::DiagnosticsStore, post_process::bloom::Bloom, prelude::*,
     text::LineHeight,
 };
 use bevy_enoki::prelude::ParticleStore;
@@ -15,7 +15,7 @@ pub struct ParticlesText;
 pub(crate) fn camera_and_ui_plugin(app: &mut App) {
     app.add_systems(PostStartup, spawn_ui)
         .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
-        .add_systems(Update, (show_fps, move_camera));
+        .add_systems(Update, (show_fps, move_camera, toggle_aabb_gizmo));
 }
 fn spawn_ui(mut cmd: Commands) {
     cmd.spawn((
@@ -55,16 +55,8 @@ fn show_fps(
 }
 
 fn debug_ui() -> impl Bundle {
-    let font = TextFont {
-        font_size: 20.,
-        line_height: LineHeight::Px(24.),
-        ..default()
-    };
-    let description_font = TextFont {
-        font_size: 16.,
-        line_height: LineHeight::Px(24.),
-        ..default()
-    };
+    let font = TextFont::from_font_size(20.);
+    let description_font = TextFont::from_font_size(16.);
     let row_node = Node {
         flex_direction: FlexDirection::Row,
         justify_content: JustifyContent::SpaceAround,
@@ -73,7 +65,7 @@ fn debug_ui() -> impl Bundle {
     };
     let description_node = Node {
         margin: UiRect::right(px(10.0)),
-        width: Val::Px(100.0),
+        width: Val::Px(150.0),
         ..Default::default()
     };
     let text_shadow = TextShadow {
@@ -91,14 +83,16 @@ fn debug_ui() -> impl Bundle {
             text_shadow,
             description_font.clone(),
             description_node.clone(),
+            LineHeight::Px(24.),
         )
     };
     let value_bundle = || {
         (
             font.clone(),
+            LineHeight::Px(24.),
             text_shadow,
             primary_color,
-            TextLayout::new_with_justify(Justify::Right),
+            TextLayout::justify(Justify::Right),
             Node {
                 min_width: Val::Px(50.0),
                 ..Default::default()
@@ -116,10 +110,10 @@ fn debug_ui() -> impl Bundle {
                 bottom: if is_top { Val::Auto } else { px(10.0) },
                 position_type: PositionType::Absolute,
                 border: UiRect::all(px(5.0)),
+                border_radius: BorderRadius::all(px(10.0)),
                 ..Default::default()
             },
             BorderColor::all(bevy::color::palettes::tailwind::NEUTRAL_600.with_alpha(0.3)),
-            BorderRadius::all(px(10.0)),
             BackgroundColor(
                 bevy::color::palettes::tailwind::NEUTRAL_900
                     // .with_alpha(0.8)
@@ -154,7 +148,7 @@ fn debug_ui() -> impl Bundle {
                 frame_bundle(false),
                 children![
                     (
-                        Text(String::from("Camera Controls")),
+                        Text(String::from("Controls")),
                         font.clone(),
                         primary_color,
                         text_shadow,
@@ -177,10 +171,17 @@ fn debug_ui() -> impl Bundle {
                     (
                         row_node.clone(),
                         children![
-                            secondary_bundle("Move"),
+                            secondary_bundle("Move Camera"),
                             (value_bundle(), Text::new("WSAD")),
                         ],
-                    )
+                    ),
+                    (
+                        row_node.clone(),
+                        children![
+                            secondary_bundle("Show/Hide AABB"),
+                            (value_bundle(), Text::new("Q"),),
+                        ],
+                    ),
                 ],
             ),
         ],
@@ -205,4 +206,14 @@ fn move_camera(
         t.translation.y += y as f32 * 300. * time.delta_secs();
         t.scale = (t.scale + (zoom as f32) * 0.1).max(Vec3::splat(0.1));
     });
+}
+
+fn toggle_aabb_gizmo(
+    inputs: Res<ButtonInput<KeyCode>>,
+    mut gizmo_config_store: ResMut<GizmoConfigStore>,
+) {
+    if inputs.just_pressed(KeyCode::KeyQ) {
+        let aabb_gizmo = gizmo_config_store.config_mut::<AabbGizmoConfigGroup>().1;
+        aabb_gizmo.draw_all = !aabb_gizmo.draw_all;
+    }
 }

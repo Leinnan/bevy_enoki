@@ -94,6 +94,7 @@ impl Plugin for EnokiPlugin {
             "shaders/particle_sprite_frag.wgsl",
             Shader::from_wgsl
         );
+
         load_internal_asset!(
             app,
             PARTICLE_ATLAS_SPRITE_FRAG,
@@ -109,7 +110,6 @@ impl Plugin for EnokiPlugin {
 
         app.register_type::<update::ParticleStore>();
         app.register_type::<update::ParticleSpawnerState>();
-        app.register_type::<update::Particle>();
         app.register_type::<ParticleEffectHandle>();
         app.init_asset::<Particle2dEffect>();
         app.init_asset_loader::<loader::ParticleEffectLoader>();
@@ -134,24 +134,21 @@ impl Plugin for EnokiPlugin {
             First,
             loader::on_asset_loaded.run_if(on_message::<AssetEvent<Particle2dEffect>>),
         );
-        app.add_systems(
-            Update,
-            (update::particles_spawn, update::update_spawner).chain(),
-        );
+
         app.add_systems(
             Update,
             (
                 loader::reload_effect,
                 update::clone_effect,
                 update::remove_finished_spawner,
-                // update::update_spawner,
-            ), // .before(update::update_spawner_particles),
+                update::update_spawner,
+            ),
         );
 
         app.add_systems(
             PostUpdate,
             (
-                update::calculcate_particle_bounds.in_set(VisibilitySystems::CalculateBounds),
+                update::calculate_particle_bounds.in_set(VisibilitySystems::CalculateBounds),
                 // check_visibility.in_set(VisibilitySystems::CheckVisibility),
             ),
         );

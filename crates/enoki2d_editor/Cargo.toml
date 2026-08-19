@@ -10,21 +10,21 @@ readme = "README.md"
 edition = "2021"
 
 [dependencies]
-bevy_egui = "0.39"
+bevy_egui = "0.40"
 anyhow = "1.0.82"
-bevy = "0.18"
-egui_plot = "0.34"
+bevy = "0.19"
+egui_plot = "0.35"
 bevy_enoki = { path = "../enoki2d" }
 crossbeam = { version = "0.8.4", features = [
   "crossbeam-deque",
   "crossbeam-channel",
 ] }
 # futures-lite = "2.3.0"
-rfd = "0.15"
-ron = "0.10"
+rfd = "0.17"
+ron = "0.12"
 serde = { version = "1.0.197", features = ["derive"] }
-tracing-subscriber = "0.3.18"
-bevy_pancam = "0.20"
+tracing-subscriber = "0.3.20"
+bevy_pancam = "0.21"
 
-[target.wasm32-unknown-unknown.dependencies]
-getrandom = { version = "0.3.3", features = ["wasm_js"] }
+[target.'cfg(all(target_family = "wasm", any(target_os = "unknown", target_os = "none")))'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
